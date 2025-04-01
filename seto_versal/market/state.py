@@ -361,6 +361,10 @@ class MarketState:
             if not hasattr(self, 'trading_day'):
                 self.trading_day = current_day
             
+            # 如果是回测模式，始终返回市场开放
+            if self.mode == 'backtest':
+                return True
+                
             # 如果是测试模式，默认市场开放
             if self.mode == 'test':
                 return True
@@ -572,8 +576,8 @@ class MarketState:
             logger.warning("MarketState has no symbols attribute")
             return []
         
-        # 在测试模式下返回所有股票
-        if self.mode == 'test':
+        # 在回测模式或测试模式下返回所有股票
+        if self.mode in ['test', 'backtest']:
             return list(self.symbols)
         
         # 在实盘模式下，检查市场是否开放

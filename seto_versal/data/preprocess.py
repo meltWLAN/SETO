@@ -76,19 +76,104 @@ class DataPreprocessor:
             return False
     
     def _create_sample_stock_list(self):
-        """创建样本股票列表"""
-        # 样本股票
-        sample_stocks = [
-            '000001.SZ', '000333.SZ', '000651.SZ', '000858.SZ',
-            '600000.SH', '600036.SH', '600276.SH', '600519.SH',
-            '601318.SH', '601888.SH'
-        ]
+        """创建样本股票列表，按行业分类组织，更符合智能交易系统要求"""
+        # 按行业分类的样本股票 (分为金融、科技、消费、医药、能源、工业等行业)
+        sample_stocks_by_sector = {
+            "金融": [
+                '000001.SZ',  # 平安银行
+                '600000.SH',  # 浦发银行
+                '600036.SH',  # 招商银行
+                '601288.SH',  # 农业银行
+                '601398.SH',  # 工商银行
+                '601318.SH',  # 中国平安
+                '601688.SH',  # 华泰证券
+                '600030.SH',  # 中信证券
+                '601628.SH',  # 中国人寿
+                '601601.SH'   # 中国太保
+            ],
+            "科技": [
+                '000725.SZ',  # 京东方A
+                '002415.SZ',  # 海康威视
+                '002230.SZ',  # 科大讯飞
+                '000063.SZ',  # 中兴通讯
+                '688981.SH',  # 中芯国际
+                '002594.SZ',  # 比亚迪电子
+                '002475.SZ',  # 立讯精密
+                '600703.SH',  # 三安光电
+                '002241.SZ',  # 歌尔股份
+                '688111.SH'   # 金山办公
+            ],
+            "消费": [
+                '000858.SZ',  # 五粮液
+                '600519.SH',  # 贵州茅台
+                '000651.SZ',  # 格力电器
+                '000333.SZ',  # 美的集团
+                '601888.SH',  # 中国中免
+                '600887.SH',  # 伊利股份
+                '603288.SH',  # 海天味业
+                '600809.SH',  # 山西汾酒
+                '002304.SZ',  # 洋河股份
+                '600690.SH'   # 海尔智家
+            ],
+            "医药": [
+                '600276.SH',  # 恒瑞医药
+                '300760.SZ',  # 迈瑞医疗
+                '300759.SZ',  # 康龙化成
+                '600196.SH',  # 复星医药
+                '603259.SH',  # 药明康德
+                '000538.SZ',  # 云南白药
+                '600085.SH',  # 同仁堂
+                '300347.SZ',  # 泰格医药
+                '600763.SH',  # 通策医疗
+                '002821.SZ'   # 凯莱英
+            ],
+            "能源": [
+                '601857.SH',  # 中国石油
+                '600028.SH',  # 中国石化
+                '601898.SH',  # 中煤能源
+                '600900.SH',  # 长江电力
+                '600905.SH',  # 三峡能源
+                '601985.SH',  # 中国核电
+                '600025.SH',  # 华能水电
+                '601225.SH',  # 陕西煤业
+                '600886.SH',  # 国投电力
+                '601088.SH'   # 中国神华
+            ],
+            "工业": [
+                '601766.SH',  # 中国中车
+                '600031.SH',  # 三一重工
+                '601390.SH',  # 中国中铁
+                '601186.SH',  # 中国铁建
+                '601800.SH',  # 中国交建
+                '600019.SH',  # 宝钢股份
+                '601669.SH',  # 中国电建
+                '601668.SH',  # 中国建筑
+                '601989.SH',  # 中国重工
+                '601899.SH'   # 紫金矿业
+            ]
+        }
         
-        # 保存股票列表
+        # 展平所有股票列表
+        all_sample_stocks = []
+        for sector, stocks in sample_stocks_by_sector.items():
+            all_sample_stocks.extend(stocks)
+        
+        # 保存完整的股票列表
         with open(os.path.join(self.data_dir, 'stock_list.json'), 'w') as f:
-            json.dump(sample_stocks, f)
+            json.dump(all_sample_stocks, f)
         
-        logger.info(f"创建样本股票列表，共 {len(sample_stocks)} 只股票")
+        # 保存行业分类信息（增强功能，用于智能分析）
+        sectors_info = {}
+        for sector, stocks in sample_stocks_by_sector.items():
+            for symbol in stocks:
+                sectors_info[symbol] = {"sector": sector}
+        
+        # 保存行业分类信息
+        os.makedirs(os.path.join(self.data_dir, 'sectors'), exist_ok=True)
+        with open(os.path.join(self.data_dir, 'sectors', 'classification.json'), 'w') as f:
+            json.dump(sectors_info, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"创建智能化样本股票列表，共 {len(all_sample_stocks)} 只股票，涵盖 {len(sample_stocks_by_sector)} 个行业")
     
     def _create_sample_price_data(self):
         """创建样本价格数据"""

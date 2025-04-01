@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union, Tuple
+import os
+import json
 
 from seto_versal.data.manager import DataManager
 from seto_versal.data.quality import DataQualityChecker
@@ -417,4 +419,150 @@ class DataQualityRiskManager:
                 1 for data in self.symbol_quality_risks.values()
                 if data['risk'] < self.medium_risk_threshold
             )
-        } 
+        }
+
+    def initialize_tradable_symbols(self):
+        """初始化可交易股票列表"""
+        try:
+            # 1. 加载预设的股票池配置
+            self.stock_pools = {
+                "沪深300": [],  # 将存储沪深300成分股
+                "中证500": [],  # 将存储中证500成分股
+                "创业板50": [],  # 将存储创业板50成分股
+                "科创50": [],   # 将存储科创50成分股
+                "全A股": [],    # 将存储全部A股
+            }
+            
+            # 2. 从TuShare加载股票池数据
+            self._load_stock_pools_from_tushare()
+            
+            # 3. 加载行业分类的股票
+            if hasattr(self, 'detailed_industry_data'):
+                for industry, stocks in self.detailed_industry_data.items():
+                    self.stock_pools[f"行业-{industry}"] = stocks
+            
+            # 4. 设置默认可交易股票池 (初始使用沪深300)
+            self.current_stock_pool = "沪深300"
+            self.tradable_symbols = self.stock_pools.get(self.current_stock_pool, [])
+            
+            # 如果没有数据，使用我们当前的股票列表作为备选
+            if not self.tradable_symbols:
+                stock_list_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 
+                                             'data', 'market', 'stock_list.json')
+                if os.path.exists(stock_list_path):
+                    with open(stock_list_path, 'r') as f:
+                        self.tradable_symbols = json.load(f)
+                else:
+                    # 使用默认股票列表
+                    self.tradable_symbols = [
+                        '000001.SZ', '000333.SZ', '000651.SZ', '000858.SZ', 
+                        '600000.SH', '600036.SH', '600276.SH', '600519.SH', 
+                        '601318.SH', '601888.SH'
+                    ]
+            
+            logger.info(f"初始化可交易股票列表完成，当前股票池：{self.current_stock_pool}，包含 {len(self.tradable_symbols)} 只股票")
+            return True
+            
+        except Exception as e:
+            logger.error(f"初始化可交易股票列表失败: {e}")
+            return False
+
+    def _load_stock_pools_from_tushare(self):
+        """从TuShare加载预设股票池数据"""
+        try:
+            import tushare as ts
+            ts.set_token("您的TuShare Token")  # 需要替换为实际的token
+            pro = ts.pro_api()
+            
+            # 加载沪深300成分股
+            try:
+                df = pro.index_weight(index_code='000300.SH', 
+                                      trade_date=datetime.datetime.now().strftime('%Y%m%d'))
+                if not df.empty:
+                    self.stock_pools["沪深300"] = df['con_code'].tolist()
+                    logger.info(f"加载沪深300成分股 {len(self.stock_pools['沪深300'])} 只")
+            except Exception as e:
+                logger.warning(f"加载沪深300成分股失败: {e}")
+            
+            # 加载中证500成分股
+            try:
+                df = pro.index_weight(index_code='000905.SH', 
+                                      trade_date=datetime.datetime.now().strftime('%Y%m%d'))
+                if not df.empty:
+                    self.stock_pools["中证500"] = df['con_code'].tolist()
+                    logger.info(f"加载中证500成分股 {len(self.stock_pools['中证500'])} 只")
+            except Exception as e:
+                logger.warning(f"加载中证500成分股失败: {e}")
+            
+            # 加载全A股列表
+            try:
+                df = pro.stock_basic(exchange='', list_status='L')
+                if not df.empty:
+                    self.stock_pools["全A股"] = df['ts_code'].tolist()
+                    logger.info(f"加载全A股列表 {len(self.stock_pools['全A股'])} 只")
+            except Exception as e:
+                logger.warning(f"加载全A股列表失败: {e}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"从TuShare加载股票池数据失败: {e}")
+            return False
+
+    def change_stock_pool(self, pool_name):
+        """切换当前股票池"""
+        if pool_name in self.stock_pools:
+            self.current_stock_pool = pool_name
+            self.tradable_symbols = self.stock_pools[pool_name]
+            # 重新初始化回测数据以反映新的股票池
+            self.backtest_stock_data = {}
+            self._initialize_backtest_stock_data()
+            logger.info(f"切换股票池为 {pool_name}，包含 {len(self.tradable_symbols)} 只股票")
+            return True
+        else:
+            logger.warning(f"股票池 {pool_name} 不存在")
+            return False
+
+    def add_stock_pool_selector(self):
+        """添加股票池选择控件"""
+        # 创建股票池选择组
+        pool_group = QGroupBox("股票池选择")
+        pool_layout = QVBoxLayout()
+        
+        # 创建下拉选择框
+        self.pool_selector = QComboBox()
+        for pool_name in self.stock_pools.keys():
+            self.pool_selector.addItem(pool_name)
+        
+        # 设置当前选中的股票池
+        index = self.pool_selector.findText(self.current_stock_pool)
+        if index >= 0:
+            self.pool_selector.setCurrentIndex(index)
+        
+        # 连接信号
+        self.pool_selector.currentTextChanged.connect(self.on_stock_pool_changed)
+        
+        # 添加到布局
+        pool_layout.addWidget(QLabel("选择股票池:"))
+        pool_layout.addWidget(self.pool_selector)
+        
+        # 添加股票池信息标签
+        self.pool_info_label = QLabel(f"当前股票池: {self.current_stock_pool} ({len(self.tradable_symbols)} 只股票)")
+        pool_layout.addWidget(self.pool_info_label)
+        
+        # 设置组布局
+        pool_group.setLayout(pool_layout)
+        
+        # 添加到主界面适当位置
+        # 例如，可以添加到市场面板或者创建一个专门的设置面板
+        if hasattr(self, 'market_panel_layout'):
+            self.market_panel_layout.addWidget(pool_group)
+
+    def on_stock_pool_changed(self, pool_name):
+        """处理股票池变更事件"""
+        if self.change_stock_pool(pool_name):
+            # 更新股票池信息标签
+            self.pool_info_label.setText(f"当前股票池: {self.current_stock_pool} ({len(self.tradable_symbols)} 只股票)")
+            # 强制更新市场数据以反映新的股票池
+            self.update_market_data()
+            # 显示通知
+            QMessageBox.information(self, "股票池已变更", f"已切换到 {pool_name} 股票池，包含 {len(self.tradable_symbols)} 只股票") 
