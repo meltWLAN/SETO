@@ -13,6 +13,7 @@ from datetime import datetime, time, timedelta
 import json
 import os
 import random
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,15 @@ class MarketState:
         self.fundamentals = {}
         self.should_evolve_flag = False
         
+        # 初始化股票行业映射
+        self.stock_sectors = {}
+        
         # Initialize data and fundamentals
         self.initialize_data()
         self.initialize_fundamentals()
+        
+        # 尝试加载行业数据
+        self._load_sector_data()
         
         logger.info(f"Initialized MarketState with {len(self.symbols)} symbols in {mode} mode")
         
@@ -1286,4 +1293,83 @@ class MarketState:
         # ... existing code ...
         # 更新基本面数据
         if not self.fundamentals or len(self.fundamentals) == 0:
-            self.initialize_fundamentals() 
+            self.initialize_fundamentals()
+
+    def get_stock_sectors(self) -> Dict[str, str]:
+        """获取股票行业映射
+        
+        Returns:
+            Dict[str, str]: 股票代码到行业的映射字典
+        """
+        return self.stock_sectors
+
+    def get_sectors(self) -> Dict[str, Dict[str, Any]]:
+        """获取所有行业及其股票列表
+        
+        Returns:
+            Dict[str, Dict[str, Any]]: 行业名称到行业信息的映射
+        """
+        # 整理行业数据
+        sectors = {}
+        
+        # 遍历所有股票，按行业分组
+        for symbol, sector in self.stock_sectors.items():
+            if sector not in sectors:
+                sectors[sector] = {
+                    'name': sector,
+                    'stocks': []
+                }
+            
+            sectors[sector]['stocks'].append(symbol)
+        
+        return sectors 
+
+    def _load_sector_data(self):
+        """加载股票行业数据"""
+        try:
+            # 尝试从sectors目录下加载行业分类数据
+            sector_file = os.path.join(self.data_dir, 'sectors/classification.json')
+            if os.path.exists(sector_file):
+                with open(sector_file, 'r', encoding='utf-8') as f:
+                    sector_data = json.load(f)
+                    
+                    # 转换为股票->行业映射
+                    for sector, stocks in sector_data.items():
+                        for symbol in stocks:
+                            self.stock_sectors[symbol] = sector
+                            
+                    logger.info(f"加载了{len(self.stock_sectors)}只股票的行业数据")
+                    return
+            
+            # 如果找不到文件，尝试从current_data中获取行业信息
+            for symbol, data in self.current_data.items():
+                if 'sector' in data:
+                    self.stock_sectors[symbol] = data['sector']
+            
+            # 如果仍然没有数据，使用默认行业分类
+            if not self.stock_sectors:
+                logger.warning("未找到行业数据文件，使用默认行业分类")
+                
+                # 默认行业分类
+                default_sectors = {
+                    'Finance': ['000001.SZ', '600000.SH', '600036.SH', '601288.SH', '601398.SH', 
+                             '601318.SH', '601688.SH', '600030.SH', '601628.SH', '601601.SH'],
+                    'Technology': ['000725.SZ', '002415.SZ', '002230.SZ', '000063.SZ', '688981.SH',
+                                '002594.SZ', '002475.SZ', '600703.SH', '002241.SZ', '688111.SH'],
+                    'Consumer': ['000858.SZ', '600519.SH', '000651.SZ', '000333.SZ', '601888.SH',
+                              '600887.SH', '603288.SH', '600809.SH', '002304.SZ', '600690.SH'],
+                    'Healthcare': ['600276.SH', '300760.SZ', '300759.SZ', '600196.SH', '603259.SH',
+                                '000538.SZ', '600085.SH', '300347.SZ', '600763.SH', '002821.SZ'],
+                    'Energy': ['601857.SH', '600028.SH', '601898.SH', '600900.SH', '600905.SH',
+                             '601985.SH', '600025.SH', '601225.SH', '600886.SH', '601088.SH'],
+                    'Industry': ['601766.SH', '600031.SH', '601390.SH', '601186.SH', '601800.SH',
+                               '600019.SH', '601669.SH', '601668.SH', '601989.SH', '601899.SH']
+                }
+                
+                # 转换为股票->行业映射
+                for sector, symbols in default_sectors.items():
+                    for symbol in symbols:
+                        self.stock_sectors[symbol] = sector
+    
+        except Exception as e:
+            logger.error(f"加载行业数据失败: {e}") 

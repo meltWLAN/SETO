@@ -2,86 +2,95 @@
 # -*- coding: utf-8 -*-
 
 """
-Base strategy module for SETO-Versal
-Defines base strategy class that all trading strategies inherit from
+策略基类模块
+
+定义所有交易策略的基础接口和公共功能
 """
 
-import logging
+from dataclasses import dataclass
+from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
-from typing import Dict, List, Any
 
-logger = logging.getLogger(__name__)
+@dataclass
+class TradeSignal:
+    """交易信号数据类"""
+    symbol: str  # 股票代码
+    signal_type: str  # 信号类型: 'buy', 'sell'
+    price: float  # 交易价格
+    quantity: int  # 交易数量
+    timestamp: datetime = None  # 信号产生时间
+    reason: str = ""  # 产生信号的原因
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
 
 class BaseStrategy:
-    """
-    Base Strategy class that all trading strategies inherit from
+    """策略基类"""
     
-    This class provides the interface and common functionality for 
-    trading strategies in the SETO-Versal system.
-    """
-    
-    def __init__(self, **kwargs):
+    def __init__(self, name: str = "基础策略"):
         """
-        Initialize base strategy
+        初始化策略
         
         Args:
-            **kwargs: Strategy parameters
+            name: 策略名称
         """
-        self.name = kwargs.get('name', self.__class__.__name__)
-        self.config = kwargs
-        self.category = kwargs.get('category', 'general')
-        self.enabled = kwargs.get('enabled', True)
-        self.weight = kwargs.get('weight', 1.0)
-        
-        logger.debug(f"BaseStrategy initialized: {self.name}, category={self.category}")
+        self.name = name
+        self.parameters = {}
+        self.performance_metrics = {}
     
-    def generate_signals(
-        self, 
-        market_data: Dict[str, Dict[datetime, Dict[str, float]]], 
-        positions: Dict[str, Dict[str, Any]] = None,
-        market_state: Dict[str, Any] = None,
-        **kwargs
-    ) -> List[Dict[str, Any]]:
+    def set_parameters(self, **kwargs):
         """
-        Generate trading signals based on market data
-        
-        This is the main method that subclasses should implement.
+        设置策略参数
         
         Args:
-            market_data: Dictionary of market data by symbol
-            positions: Current positions
-            market_state: Current market state information
-            **kwargs: Additional parameters
+            **kwargs: 参数名称和值
+        """
+        for key, value in kwargs.items():
+            self.parameters[key] = value
+    
+    def generate_signals(self, 
+                        market_data: Dict[str, Any], 
+                        positions: Dict[str, Any] = None,
+                        market_state: Dict[str, Any] = None) -> List[TradeSignal]:
+        """
+        生成交易信号
+        
+        Args:
+            market_data: 市场数据，包含价格、成交量等
+            positions: 当前持仓信息
+            market_state: 市场状态，如日期、交易时段等
             
         Returns:
-            List of trading signals
+            交易信号列表
         """
-        raise NotImplementedError("Subclasses must implement generate_signals()")
+        # 在子类中实现具体的信号生成逻辑
+        return []
     
-    def get_name(self) -> str:
-        """Get strategy name"""
-        return self.name
-    
-    def get_category(self) -> str:
-        """Get strategy category"""
-        return self.category
-    
-    def is_enabled(self) -> bool:
-        """Check if strategy is enabled"""
-        return self.enabled
-    
-    def enable(self):
-        """Enable the strategy"""
-        self.enabled = True
+    def update_performance(self, metrics: Dict[str, Any]):
+        """
+        更新策略性能指标
         
-    def disable(self):
-        """Disable the strategy"""
-        self.enabled = False
+        Args:
+            metrics: 性能指标
+        """
+        self.performance_metrics.update(metrics)
     
-    def get_weight(self) -> float:
-        """Get strategy weight"""
-        return self.weight
+    def get_performance(self) -> Dict[str, Any]:
+        """
+        获取策略性能指标
+        
+        Returns:
+            性能指标
+        """
+        return self.performance_metrics
     
-    def set_weight(self, weight: float):
-        """Set strategy weight"""
-        self.weight = weight 
+    def reset(self):
+        """
+        重置策略状态
+        """
+        self.performance_metrics = {}
+    
+    def __str__(self) -> str:
+        """字符串表示"""
+        return f"{self.name} Strategy" 
