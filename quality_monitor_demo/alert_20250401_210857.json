@@ -1,0 +1,83 @@
+{
+  "timestamp": "2025-04-01 21:08:57.616824",
+  "type": "market_data_quality",
+  "message": "Market data quality check failed 5 times consecutively",
+  "details": {
+    "missing_values": {
+      "valid": false,
+      "missing_columns": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "symbol"
+      ],
+      "missing_pct": {
+        "date": 0.015384615384615385,
+        "open": 0.02197802197802198,
+        "high": 0.017582417582417582,
+        "low": 0.02197802197802198,
+        "close": 0.024175824175824177,
+        "volume": 0.03076923076923077,
+        "symbol": 0.03296703296703297
+      },
+      "threshold": 0.01
+    },
+    "stale_data": {
+      "valid": true,
+      "most_recent_date": "2025-04-01 21:08:42.281943",
+      "days_since_update": -1,
+      "threshold": 3
+    },
+    "price_jumps": {
+      "valid": false,
+      "extreme_jumps": 22,
+      "jump_indices": [
+        8,
+        11,
+        67,
+        73,
+        130,
+        132,
+        148,
+        159,
+        182,
+        193,
+        206,
+        269,
+        272,
+        290,
+        302,
+        339,
+        353,
+        364,
+        377,
+        393,
+        436,
+        439
+      ],
+      "max_jump": 2.7835188851637467,
+      "threshold": 0.1
+    },
+    "zero_volume": {
+      "valid": "True",
+      "zero_volume_count": "0",
+      "zero_volume_pct": 0.0,
+      "threshold": 0.2
+    },
+    "consistency": {
+      "valid": "False",
+      "duplicates": "3",
+      "symbols_with_missing_dates": 6,
+      "symbol_examples": [
+        "STOCK001",
+        NaN,
+        "STOCK002",
+        "STOCK003",
+        "STOCK004"
+      ]
+    }
+  }
+}

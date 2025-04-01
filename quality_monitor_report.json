@@ -1,0 +1,14 @@
+{
+  "report_date": "2025-04-01 21:09:12.745371",
+  "period_days": 7,
+  "total_checks": 7,
+  "successful_checks": 0,
+  "success_rate": 0.0,
+  "common_issues": {
+    "missing_values": 7,
+    "price_jumps": 7,
+    "consistency": 7
+  },
+  "most_recent_check": "2025-04-01 21:09:07.738844",
+  "consecutive_failures": 7
+}

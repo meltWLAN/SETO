@@ -1,0 +1,22 @@
+# 数据配置
+data:
+  # 全局缓存配置
+  cache_dir: data/cache
+  history_days: 365
+  universe: hs300
+  
+  # 是否启用雅虎财经数据源
+  enable_yahoo: true
+  
+  # 雅虎财经数据源配置
+  yahoo_config:
+    cache_dir: data/cache/yahoo
+    rate_limit:
+      minute: 2000
+    markets:
+      - US
+      - HK
+      - UK
+      - JP
+      - CRYPTO
+      - ETF 

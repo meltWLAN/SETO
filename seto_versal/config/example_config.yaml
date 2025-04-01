@@ -1,0 +1,122 @@
+# SETO-Versal 系统配置示例
+# 这是一个包含所有可用配置选项的示例配置文件
+
+system_name: "SETO-Versal"
+log_level: "INFO"  # 可选: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_file: "logs/seto-versal.log"
+data_dir: "data"
+output_dir: "output"
+temp_dir: "temp"
+timezone: "UTC"
+max_threads: 4
+debug_mode: false
+
+# 各组件配置
+components:
+  # 风险控制器配置
+  risk_controller:
+    name: "main_risk"
+    max_drawdown_percent: 10.0  # 最大回撤百分比
+    max_position_percent: 5.0   # 单个持仓最大百分比
+    initial_risk_level: "MEDIUM"  # 初始风险级别: LOW, MEDIUM, HIGH, CRITICAL
+    risk_rules_file: "config/risk_rules.yaml"  # 风险规则文件
+    min_cash_reserve_percent: 20.0  # 最低现金保留百分比
+    max_sector_exposure_percent: 30.0  # 单个行业最大敞口百分比
+    state_file: "data/risk/main_risk_state.json"  # 状态保存文件
+
+  # 策略进化管理器配置
+  evolution_manager:
+    name: "main_evolution"
+    population_size: 50  # 种群大小
+    generations: 20  # 进化代数
+    mutation_rate: 0.1  # 变异率
+    crossover_rate: 0.8  # 交叉率
+    selection_size: 10  # 选择规模
+    elite_size: 5  # 精英保留数量
+    fitness_function: "sharpe_ratio"  # 适应度函数: sharpe_ratio, sortino_ratio, calmar_ratio, etc.
+    evaluation_period: "1Y"  # 评估周期
+    output_dir: "output/evolution"  # 输出目录
+    random_seed: 42  # 随机种子，用于重现结果
+    # 参数范围定义
+    parameter_ranges:
+      fast_period:
+        min: 5
+        max: 50
+        type: "integer"
+      slow_period:
+        min: 20
+        max: 200
+        type: "integer"
+      rsi_period:
+        min: 2
+        max: 30
+        type: "integer"
+      rsi_threshold:
+        min: 10.0
+        max: 40.0
+        type: "float"
+
+  # 策略管理器配置
+  strategy_manager:
+    name: "main_strategy"
+    strategies_dir: "strategies"  # 策略目录
+    active_strategies:  # 活跃策略列表
+      - "MovingAverageCrossover"
+      - "RSIStrategy"
+    default_settings:  # 默认策略参数
+      position_size_percent: 2.0
+      stop_loss_percent: 5.0
+      take_profit_percent: 10.0
+    state_file: "data/strategy/strategy_state.json"  # 状态保存文件
+    max_active_strategies: 10  # 最大活跃策略数量
+
+  # 数据管理器配置
+  data_manager:
+    name: "main_data"
+    data_sources:  # 数据源配置
+      alpha_vantage:
+        type: "alpha_vantage"
+        api_key: "your_api_key"
+        cache_dir: "data/cache/alpha_vantage"
+        cache_expiry_seconds: 86400  # 24小时
+      yahoo:
+        type: "yahoo_finance"
+        cache_dir: "data/cache/yahoo"
+    default_source: "yahoo"  # 默认数据源
+    local_data_dir: "data/market"  # 本地数据目录
+    download_missing: true  # 是否下载缺失数据
+
+  # 回测引擎配置
+  backtest_engine:
+    name: "main_backtest"
+    initial_capital: 100000.0  # 初始资金
+    start_date: "2020-01-01"  # 开始日期
+    end_date: "2023-12-31"  # 结束日期
+    symbols:  # 回测品种
+      - "AAPL"
+      - "MSFT"
+      - "GOOG"
+      - "AMZN"
+    timeframe: "1d"  # 时间框架: 1m, 5m, 1h, 1d, etc.
+    commission_rate: 0.001  # 佣金率
+    slippage_model: "fixed"  # 滑点模型: fixed, percentage, etc.
+    data_source: "yahoo"  # 数据源
+    execution_model: "market_close"  # 执行模型: market_open, market_close, etc.
+    report_file: "output/backtest/report.html"  # 报告文件
+    detail_level: "medium"  # 细节级别: low, medium, high
+    plot_results: true  # 是否绘制结果图表
+
+  # 执行客户端配置
+  execution_client:
+    name: "main_execution"
+    client_type: "simulator"  # 客户端类型: simulator, binance, etc.
+    initial_balance: 100000.0  # 初始余额
+    commission_rate: 0.001  # 佣金率
+    slippage_model: "percentage"  # 滑点模型
+    order_latency_ms: 250  # 订单延迟（毫秒）
+    fill_latency_ms: 100  # 成交延迟（毫秒）
+    # 以下字段仅在使用实际交易所时需要
+    api_key: ""
+    api_secret: ""
+    base_url: ""
+    use_testnet: true  # 是否使用测试网络 

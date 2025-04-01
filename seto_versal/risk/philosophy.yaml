@@ -1,0 +1,70 @@
+# SETO-Versal Risk Philosophy
+# This file defines the risk management rules and thresholds
+
+# Global risk thresholds
+max_drawdown_percent: 3.0
+max_position_percent: 25.0
+max_sector_percent: 40.0
+min_cash_percent: 10.0
+consecutive_loss_limit: 3
+cooling_period_days: 1
+fixed_stop_loss_percent: 5.0
+
+# Trading behavior rules
+prohibit_averaging_down: true
+require_stop_loss: true
+allow_overnight_positions: true
+max_overnight_exposure_percent: 50.0
+max_daily_trades: 10
+
+# Risk level specific rules
+rules_by_risk_level:
+  low:
+    description: "Low risk mode - conservative allocations with high cash reserves"
+    max_position_percent: 15.0
+    min_cash_percent: 25.0
+    max_daily_trades: 5
+    max_sector_percent: 30.0
+    max_overnight_exposure_percent: 30.0
+    
+  medium:
+    description: "Medium risk mode - balanced allocations with moderate cash reserves"
+    max_position_percent: 25.0
+    min_cash_percent: 15.0
+    max_daily_trades: 10
+    max_sector_percent: 40.0
+    max_overnight_exposure_percent: 50.0
+    
+  high:
+    description: "High risk mode - aggressive allocations with minimal cash reserves"
+    max_position_percent: 35.0
+    min_cash_percent: 10.0
+    max_daily_trades: 15
+    max_sector_percent: 50.0
+    max_overnight_exposure_percent: 75.0
+    
+  critical:
+    description: "Critical risk mode - defensive positioning with maximum protection"
+    max_position_percent: 5.0
+    min_cash_percent: 50.0
+    max_daily_trades: 2
+    max_sector_percent: 10.0
+    max_overnight_exposure_percent: 10.0
+    prohibit_averaging_down: true
+    allow_overnight_positions: false
+
+# Risk triggers that cause risk level changes
+risk_triggers:
+  drawdown_critical_pct: 2.4  # 80% of max_drawdown
+  drawdown_high_pct: 1.8      # 60% of max_drawdown
+  drawdown_medium_pct: 0.9    # 30% of max_drawdown
+  consecutive_losses_critical: 5
+  consecutive_losses_high: 3
+  vix_critical_level: 30
+  vix_high_level: 25
+  
+# Auto cool-down periods after violations
+cool_down_periods:
+  after_max_drawdown_hours: 48
+  after_consecutive_losses_hours: 24
+  after_system_error_hours: 12 
