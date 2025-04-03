@@ -4,8 +4,8 @@
 """
 SETO-Versal 数据缓存模块
 
-提供高性能的数据缓存功能，减少数据源访问频率和提高数据读取速度。
-支持多级缓存策略，包括内存缓存、磁盘缓存和分布式缓存。
+提供高效的多级缓存系统，支持内存和磁盘缓存
+具有自动过期和清理功能
 """
 
 import os
@@ -17,7 +17,8 @@ import pickle
 import hashlib
 import threading
 import time
-from datetime import datetime, timedelta
+import datetime
+from datetime import timedelta
 from typing import Dict, List, Any, Optional, Union, Tuple, Set, Callable
 from enum import Enum
 
@@ -39,32 +40,41 @@ class CachePolicy(Enum):
 
 class DataCache:
     """
-    数据缓存类，提供多级缓存功能
+    数据缓存器，支持多级缓存
     """
     
     def __init__(self, config: Dict[str, Any] = None):
         """
-        初始化数据缓存
+        初始化缓存系统
         
         Args:
-            config: 配置参数，包括缓存目录、最大容量、缓存策略等
+            config: 缓存配置参数
         """
         self.config = config or {}
-        self.base_dir = self.config.get('cache_dir', os.path.join('data', 'cache'))
-        self.max_memory_items = self.config.get('max_memory_items', 100)
-        self.max_disk_size_mb = self.config.get('max_disk_size_mb', 1000)
-        self.default_ttl = self.config.get('default_ttl', 3600)  # 默认缓存1小时
-        self.policy = CachePolicy(self.config.get('policy', 'lru'))
         
-        # 创建缓存目录
+        # 缓存策略
+        policy_str = self.config.get('policy', 'lru')
+        self.policy = CachePolicy(policy_str.lower())
+        
+        # 缓存参数
+        self.max_memory_items = self.config.get('max_memory_items', 1000)
+        self.max_disk_size_mb = self.config.get('max_disk_size_mb', 1024)
+        self.default_ttl = self.config.get('default_ttl', 3600)  # 默认1小时
+        
+        # 缓存目录
+        self.base_dir = self.config.get('cache_dir', 'data/cache')
         os.makedirs(self.base_dir, exist_ok=True)
         
         # 内存缓存
         self.memory_cache: Dict[str, Dict] = {}
-        self.access_times: Dict[str, float] = {}  # 用于LRU策略
-        self.expiry_times: Dict[str, float] = {}  # 用于TTL策略
         
-        # 缓存统计
+        # 访问时间记录
+        self.access_times: Dict[str, float] = {}
+        
+        # 过期时间记录
+        self.expiry_times: Dict[str, float] = {}
+        
+        # 统计信息
         self.stats = {
             'memory_hits': 0,
             'disk_hits': 0,
@@ -80,14 +90,14 @@ class DataCache:
                    f"内存容量: {self.max_memory_items}项, "
                    f"磁盘容量: {self.max_disk_size_mb}MB")
     
-    def _generate_key(self, symbol: str, timeframe: TimeFrame, 
-                     start_time: Optional[datetime] = None, 
-                     end_time: Optional[datetime] = None) -> str:
+    def _generate_key(self, symbol: str, timeframe=None, 
+                     start_time: Optional['datetime.datetime'] = None, 
+                     end_time: Optional['datetime.datetime'] = None) -> str:
         """
         生成缓存键
         
         Args:
-            symbol: 交易品种代码
+            symbol: 交易品种代码或键名
             timeframe: 时间周期
             start_time: 开始时间
             end_time: 结束时间
@@ -96,7 +106,15 @@ class DataCache:
             缓存键字符串
         """
         # 构建基本键
-        key_parts = [symbol, timeframe.value]
+        key_parts = [symbol]
+        
+        # 如果指定了时间周期，添加到键中
+        if timeframe is not None:
+            try:
+                key_parts.append(timeframe.value)
+            except AttributeError:
+                # 如果timeframe不是枚举，直接使用字符串表示
+                key_parts.append(str(timeframe))
         
         # 如果指定了时间范围，添加到键中
         if start_time:
@@ -112,20 +130,20 @@ class DataCache:
         """获取磁盘缓存路径"""
         return os.path.join(self.base_dir, f"{key}.pkl")
     
-    def get(self, symbol: str, timeframe: TimeFrame, 
-           start_time: Optional[datetime] = None, 
-           end_time: Optional[datetime] = None) -> Optional[pd.DataFrame]:
+    def get(self, symbol: str, timeframe=None, 
+           start_time: Optional['datetime.datetime'] = None, 
+           end_time: Optional['datetime.datetime'] = None) -> Optional[Any]:
         """
         从缓存获取数据
         
         Args:
-            symbol: 交易品种代码
+            symbol: 交易品种代码或键名
             timeframe: 时间周期
             start_time: 开始时间
             end_time: 结束时间
             
         Returns:
-            DataFrame数据，如果缓存未命中则返回None
+            DataFrame数据或缓存的对象，如果缓存未命中则返回None
         """
         key = self._generate_key(symbol, timeframe, start_time, end_time)
         
@@ -137,11 +155,11 @@ class DataCache:
                 
                 # 检查是否已过期
                 if key in self.expiry_times and time.time() > self.expiry_times[key]:
-                    logger.debug(f"缓存过期: {symbol} {timeframe.value}")
+                    logger.debug(f"缓存过期: {symbol} {timeframe}")
                     self._remove_from_memory(key)
                 else:
                     self.stats['memory_hits'] += 1
-                    logger.debug(f"内存缓存命中: {symbol} {timeframe.value}")
+                    logger.debug(f"内存缓存命中: {symbol} {timeframe}")
                     return self.memory_cache[key]['data']
             
             # 尝试从磁盘缓存获取
@@ -153,33 +171,33 @@ class DataCache:
                         
                     # 检查是否已过期
                     if 'expiry' in cache_item and time.time() > cache_item['expiry']:
-                        logger.debug(f"磁盘缓存过期: {symbol} {timeframe.value}")
+                        logger.debug(f"磁盘缓存过期: {symbol} {timeframe}")
                         os.remove(disk_path)
                     else:
                         # 加载到内存缓存
                         self._add_to_memory(key, cache_item)
                         
                         self.stats['disk_hits'] += 1
-                        logger.debug(f"磁盘缓存命中: {symbol} {timeframe.value}")
+                        logger.debug(f"磁盘缓存命中: {symbol} {timeframe}")
                         return cache_item['data']
                 except Exception as e:
                     logger.warning(f"读取磁盘缓存失败: {e}")
             
             # 缓存未命中
             self.stats['misses'] += 1
-            logger.debug(f"缓存未命中: {symbol} {timeframe.value}")
+            logger.debug(f"缓存未命中: {symbol} {timeframe}")
             return None
     
-    def set(self, symbol: str, timeframe: TimeFrame, data: pd.DataFrame,
-           start_time: Optional[datetime] = None, 
-           end_time: Optional[datetime] = None,
+    def set(self, symbol: str, timeframe=None, data: Any=None,
+           start_time: Optional['datetime.datetime'] = None, 
+           end_time: Optional['datetime.datetime'] = None,
            ttl: Optional[int] = None,
-           cache_levels: Set[CacheLevel] = {CacheLevel.MEMORY, CacheLevel.DISK}) -> bool:
+           cache_levels: Set[CacheLevel] = None) -> bool:
         """
         将数据写入缓存
         
         Args:
-            symbol: 交易品种代码
+            symbol: 交易品种代码或键名
             timeframe: 时间周期
             data: 要缓存的数据
             start_time: 开始时间
@@ -190,25 +208,46 @@ class DataCache:
         Returns:
             是否写入成功
         """
-        if data is None or data.empty:
-            logger.warning(f"尝试缓存空数据: {symbol} {timeframe.value}")
+        if data is None:
+            logger.warning(f"尝试缓存空数据: {symbol}")
             return False
+            
+        # 使用默认缓存级别
+        if cache_levels is None:
+            cache_levels = {CacheLevel.MEMORY, CacheLevel.DISK}
         
         key = self._generate_key(symbol, timeframe, start_time, end_time)
         ttl = ttl or self.default_ttl
         expiry = time.time() + ttl
         
+        # 准备元数据
+        metadata = {}
+        try:
+            # 如果数据是DataFrame，添加行数和时间范围信息
+            if hasattr(data, 'index') and hasattr(data, '__len__'):
+                metadata = {
+                    'rows': len(data),
+                    'start': data.index[0].strftime('%Y-%m-%d %H:%M:%S') if len(data) > 0 else None,
+                    'end': data.index[-1].strftime('%Y-%m-%d %H:%M:%S') if len(data) > 0 else None
+                }
+            # 对于其他类型的数据，添加基本信息
+            elif isinstance(data, dict):
+                metadata = {'items': len(data)}
+            elif isinstance(data, list) or isinstance(data, set):
+                metadata = {'items': len(data)}
+            else:
+                metadata = {'type': type(data).__name__}
+        except Exception as e:
+            logger.warning(f"生成缓存元数据失败: {e}")
+            metadata = {'error': '元数据生成失败'}
+        
         cache_item = {
             'data': data,
             'symbol': symbol,
-            'timeframe': timeframe.value,
+            'timeframe': timeframe,
             'created': time.time(),
             'expiry': expiry,
-            'metadata': {
-                'rows': len(data),
-                'start': data.index[0].strftime('%Y-%m-%d %H:%M:%S') if len(data) > 0 else None,
-                'end': data.index[-1].strftime('%Y-%m-%d %H:%M:%S') if len(data) > 0 else None
-            }
+            'metadata': metadata
         }
         
         with self._lock:
@@ -222,7 +261,7 @@ class DataCache:
                     disk_path = self._get_disk_path(key)
                     with open(disk_path, 'wb') as f:
                         pickle.dump(cache_item, f)
-                    logger.debug(f"数据已写入磁盘缓存: {symbol} {timeframe.value}")
+                    logger.debug(f"数据已写入磁盘缓存: {symbol} {timeframe}")
                 except Exception as e:
                     logger.error(f"写入磁盘缓存失败: {e}")
                     return False
@@ -279,7 +318,7 @@ class DataCache:
         
         self.stats['evictions'] += 1
     
-    def invalidate(self, symbol: str = None, timeframe: TimeFrame = None) -> int:
+    def invalidate(self, symbol: str = None, timeframe = None) -> int:
         """
         使缓存失效
         
@@ -297,7 +336,7 @@ class DataCache:
             keys_to_remove = []
             for key, item in self.memory_cache.items():
                 if ((symbol is None or item['symbol'] == symbol) and 
-                    (timeframe is None or item['timeframe'] == timeframe.value)):
+                    (timeframe is None or item['timeframe'] == timeframe)):
                     keys_to_remove.append(key)
             
             for key in keys_to_remove:
@@ -319,7 +358,7 @@ class DataCache:
                             with open(os.path.join(self.base_dir, f), 'rb') as file:
                                 item = pickle.load(file)
                                 if ((symbol is None or item['symbol'] == symbol) and 
-                                    (timeframe is None or item['timeframe'] == timeframe.value)):
+                                    (timeframe is None or item['timeframe'] == timeframe)):
                                     os.remove(os.path.join(self.base_dir, f))
                                     count += 1
                         except Exception as e:
@@ -369,8 +408,8 @@ class DataCache:
             
             logger.info("缓存已清空")
     
-    def preload(self, symbol: str, timeframe: TimeFrame,
-              start_time: datetime, end_time: datetime,
+    def preload(self, symbol: str, timeframe,
+              start_time: "datetime.datetime", end_time: "datetime.datetime",
               data: pd.DataFrame) -> bool:
         """
         预加载数据到缓存
@@ -385,8 +424,12 @@ class DataCache:
         Returns:
             是否预加载成功
         """
-        logger.info(f"预加载数据到缓存: {symbol} {timeframe.value}, "
-                   f"{start_time.strftime('%Y-%m-%d')} 至 "
-                   f"{end_time.strftime('%Y-%m-%d')}")
+        try:
+            timeframe_str = timeframe.value if hasattr(timeframe, 'value') else str(timeframe)
+            logger.info(f"预加载数据到缓存: {symbol} {timeframe_str}, "
+                       f"{start_time.strftime('%Y-%m-%d')} 至 "
+                       f"{end_time.strftime('%Y-%m-%d')}")
+        except Exception as e:
+            logger.info(f"预加载数据到缓存: {symbol}, {start_time.strftime('%Y-%m-%d')} 至 {end_time.strftime('%Y-%m-%d')}")
                    
         return self.set(symbol, timeframe, data, start_time, end_time) 

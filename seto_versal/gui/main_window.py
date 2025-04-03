@@ -7,7 +7,7 @@ SETO-Versal GUI主窗口
 
 import sys
 import logging
-from datetime import datetime
+import datetime
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QComboBox, 
                             QTableWidget, QTableWidgetItem, QTabWidget,
@@ -502,7 +502,7 @@ class MainWindow(QMainWindow):
                 self.sell_signals_widgets.append(widget)
                 
             # 更新最新更新时间
-            current_time = datetime.now().strftime('%H:%M:%S')
+            current_time = datetime.datetime.now().strftime('%H:%M:%S')
             self.signal_update_time_label.setText(f"最后更新: {current_time}")
                 
         except Exception as e:
@@ -562,7 +562,7 @@ class MainWindow(QMainWindow):
             price = signal.get('price', 0.0)
             confidence = signal.get('confidence', 0.0)
             reason = signal.get('reason', '')
-            timestamp = signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            timestamp = signal.get('timestamp', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             
             action_text = "买入" if signal_type == 'buy' else "卖出"
             
@@ -767,9 +767,9 @@ class MainWindow(QMainWindow):
             
             # 更新状态标签
             if self.market_state.is_market_open():
-                self.status_label.setText(f"系统状态: 运行中 | 市场开盘 | {datetime.now().strftime('%H:%M:%S')}")
+                self.status_label.setText(f"系统状态: 运行中 | 市场开盘 | {datetime.datetime.now().strftime('%H:%M:%S')}")
             else:
-                self.status_label.setText(f"系统状态: 运行中 | 市场休市 | {datetime.now().strftime('%H:%M:%S')}")
+                self.status_label.setText(f"系统状态: 运行中 | 市场休市 | {datetime.datetime.now().strftime('%H:%M:%S')}")
             
         except Exception as e:
             logger.error(f"更新状态失败: {e}")

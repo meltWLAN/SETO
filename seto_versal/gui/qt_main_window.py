@@ -2,48 +2,90 @@
 # -*- coding: utf-8 -*-
 
 """
-SETO-Versal 交易系统 PyQt6 主窗口
+SETO-Versal GUI主界面模块
 """
 
-import os
-import sys
-import time
 import logging
-import datetime
-from pathlib import Path
-import random
+import sys
+import os
 import json
-
-from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, 
-                            QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                            QTableWidget, QTableWidgetItem, QStatusBar, 
-                            QGroupBox, QGridLayout, QTextEdit, QComboBox,
-                            QMessageBox, QSplitter, QFrame, QHeaderView,
-                            QListWidget, QInputDialog, QDialog, QFormLayout,
-                            QSpinBox, QDoubleSpinBox, QDialogButtonBox,
-                            QProgressDialog, QProgressBar, QLineEdit, QCheckBox,
-                            QRadioButton, QButtonGroup, QFileDialog, QSpacerItem,
-                            QSizePolicy)
-from PyQt6.QtCore import Qt, QTimer, QDateTime, QSize, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QColor, QPainter, QPixmap
-
-# 添加图表相关导入
-from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QPieSeries, QValueAxis, QBarSeries, QBarSet
-
-# 添加matplotlib集成
-import matplotlib
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
+from datetime import datetime
+from datetime import timedelta
+import random
+import time
 import numpy as np
 import pandas as pd
+from typing import Dict, List, Any, Tuple, Optional
+from enum import Enum, auto
 
-# 导入市场状态
+# 导入Qt相关库
+from PyQt6.QtCore import (
+    Qt, QTimer, QDateTime, QDate, QTime, 
+    QAbstractTableModel, QModelIndex, QSize,
+    QThread, pyqtSignal, QObject, QEvent
+)
+from PyQt6.QtGui import (
+    QFont, QColor, QPalette, QPixmap, QIcon, 
+    QStandardItemModel, QStandardItem, QPainter,
+    QCursor, QContextMenuEvent, QAction, QTextCharFormat
+)
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QTabWidget, 
+    QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+    QLabel, QPushButton, QLineEdit, QComboBox, 
+    QCheckBox, QRadioButton, QButtonGroup, QSlider,
+    QTableView, QTableWidget, QTableWidgetItem, QHeaderView,
+    QScrollArea, QSplitter, QFrame, QToolBar, QStatusBar,
+    QDialog, QDialogButtonBox, QFileDialog, QMessageBox,
+    QMenu, QMenuBar, QToolButton, QGroupBox, QTextEdit,
+    QCalendarWidget, QDateEdit, QTimeEdit, QDateTimeEdit,
+    QSpinBox, QDoubleSpinBox, QProgressBar, QSpacerItem,
+    QSizePolicy, QSystemTrayIcon, QTreeView, QListWidget,
+    QListWidgetItem, QAbstractItemView, QStackedWidget,
+    QStyleFactory, QInputDialog, QProgressDialog
+)
+
+# 导入matplotlib相关库
+import matplotlib
+matplotlib.use('Qt5Agg')  # 必须在导入其他matplotlib库之前设置后端
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+
+# 导入PyQtGraph相关库
+import pyqtgraph as pg
+from pyqtgraph import PlotWidget, plot
+
+# 尝试导入Qt图表相关库，如果不可用则使用替代方案
+try:
+    from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QPieSeries, QBarSet, QBarSeries, QStackedBarSeries
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logger.warning("PyQt6.QtCharts 模块不可用，使用matplotlib作为替代方案")
+    HAS_QT_CHARTS = False
+else:
+    HAS_QT_CHARTS = True
+
+# 导入自定义模块
 from seto_versal.market.state import MarketState
+from seto_versal.agents.base import Agent
+from seto_versal.agents.trend import TrendAgent
+from seto_versal.agents.sector_rotation import SectorRotationAgent
+from seto_versal.agents.defensive import DefensiveAgent
+from seto_versal.agents.rapid_agent import RapidAgent
+from seto_versal.ai.intelligence_engine import IntelligenceEngine
+from seto_versal.data.enhanced_data_manager import EnhancedDataManager, TimeFrame
+from seto_versal.data.database_manager import DatabaseManager
 
 # 设置日志
 logger = logging.getLogger(__name__)
+
+# 添加连接器模块的引入
+try:
+    from seto_versal.gui.market_data_connector import MarketDataConnector, replace_timer_with_connector
+except ImportError:
+    logger.warning("市场数据连接器模块未找到，将使用传统定时器更新机制")
 
 class MarketStateDisplay(QWidget):
     """市场状态显示组件"""
@@ -162,6 +204,10 @@ class MarketStateDisplay(QWidget):
             self.market_status_label.setStyleSheet("color: gray;")
         else:
             self.market_status_label.setStyleSheet("")
+        
+        # 更新市场时间
+        current_time = datetime.now().strftime("%H:%M:%S")
+        self.market_time_label.setText(f"市场时间: {current_time}")
         
         # 更新其他市场数据
         self.up_count_label.setText(str(market_data.get('up_count', 0)))
@@ -299,7 +345,7 @@ class TradePanel(QWidget):
     
     def add_log_entry(self, text):
         """添加交易日志条目"""
-        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        time_str = datetime.now().strftime("%H:%M:%S")
         self.trade_log.append(f"[{time_str}] {text}")
     
     def buy_stock(self):
@@ -443,38 +489,115 @@ class SectorChart(QWidget):
         # 创建布局
         layout = QVBoxLayout(self)
         
+        # 创建图表类型选择区域
+        chart_selector_layout = QHBoxLayout()
+        
         # 创建图表类型选择
         self.chart_type_combo = QComboBox()
-        self.chart_type_combo.addItems(["行业涨跌幅", "行业热度", "行业轮动"])
+        self.chart_type_combo.addItems(["行业涨跌幅", "行业热度", "行业轮动", "智能热点图"])
         self.chart_type_combo.currentIndexChanged.connect(self.update_chart)
         
-        layout.addWidget(QLabel("图表类型:"))
-        layout.addWidget(self.chart_type_combo)
+        # 添加图表排序选项
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["按涨幅排序", "按龙头表现排序", "按行业名称排序"])
+        self.sort_combo.currentIndexChanged.connect(self.update_chart)
+        
+        # 添加到选择器布局
+        chart_selector_layout.addWidget(QLabel("图表类型:"))
+        chart_selector_layout.addWidget(self.chart_type_combo)
+        chart_selector_layout.addWidget(QLabel("排序方式:"))
+        chart_selector_layout.addWidget(self.sort_combo)
+        chart_selector_layout.addStretch(1)
+        
+        layout.addLayout(chart_selector_layout)
         
         # 创建matplotlib图形
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
         
+        # 添加导航工具栏，支持缩放、平移等交互
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas)
+        
+        # 添加图表描述标签
+        self.chart_description = QLabel("点击图表元素查看详细信息")
+        self.chart_description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.chart_description)
         
         # 数据存储
         self.sectors_data = []
         
+        # 连接点击事件
+        self.canvas.mpl_connect('pick_event', self.on_pick)
+        
+    def on_pick(self, event):
+        """处理图表元素被点击的事件"""
+        if not hasattr(event, 'ind') or not self.sectors_data:
+            return
+            
+        # 获取当前图表类型
+        chart_type = self.chart_type_combo.currentText()
+        
+        # 获取点击的索引
+        ind = event.ind
+        if len(ind) == 0:
+            return
+            
+        ind = ind[0]
+        
+        # 确保索引在有效范围内
+        if ind >= len(self.sectors_data):
+            return
+            
+        # 获取被点击的行业数据
+        sector = self.sectors_data[ind]
+        
+        # 创建详细信息文本
+        detail_text = f"<b>{sector['name']}</b><br>"
+        detail_text += f"涨跌幅: <span style='color:{'red' if sector['change_pct'] > 0 else 'green'}'>{sector['change_pct']:+.2f}%</span><br>"
+        detail_text += f"龙头股: {sector['leading_stocks']}<br>"
+        detail_text += f"龙头涨跌幅: <span style='color:{'red' if sector['leading_change'] > 0 else 'green'}'>{sector['leading_change']:+.2f}%</span>"
+        
+        # 更新描述标签
+        self.chart_description.setText(detail_text)
+        self.chart_description.setTextFormat(Qt.TextFormat.RichText)
+        
     def update_chart(self):
         """根据选择的图表类型更新图表"""
         if not self.sectors_data:
+            self.ax.clear()
+            self.ax.text(0.5, 0.5, '暂无行业数据', 
+                      ha='center', va='center', 
+                      fontsize=14, color='gray',
+                      transform=self.ax.transAxes)
+            self.figure.tight_layout()
+            self.canvas.draw()
             return
             
         chart_type = self.chart_type_combo.currentText()
+        sort_type = self.sort_combo.currentText()
+        
+        # 根据排序类型排序数据
+        sorted_data = self.sectors_data.copy()
+        if sort_type == "按涨幅排序":
+            sorted_data.sort(key=lambda x: x["change_pct"], reverse=True)
+        elif sort_type == "按龙头表现排序":
+            sorted_data.sort(key=lambda x: x["leading_change"], reverse=True)
+        elif sort_type == "按行业名称排序":
+            sorted_data.sort(key=lambda x: x["name"])
+        
         self.ax.clear()
         
         if chart_type == "行业涨跌幅":
-            self._draw_sector_performance_chart()
+            self._draw_sector_performance_chart(sorted_data)
         elif chart_type == "行业热度":
-            self._draw_sector_heatmap()
+            self._draw_sector_heatmap(sorted_data)
         elif chart_type == "行业轮动":
-            self._draw_sector_rotation_chart()
+            self._draw_sector_rotation_chart(sorted_data)
+        elif chart_type == "智能热点图":
+            self._draw_sector_bubble_chart(sorted_data)
             
         self.figure.tight_layout()
         self.canvas.draw()
@@ -483,53 +606,71 @@ class SectorChart(QWidget):
         """设置行业数据"""
         self.sectors_data = sectors_data
         self.update_chart()
-        
-    def _draw_sector_performance_chart(self):
+    
+    def _draw_sector_performance_chart(self, sectors_data):
         """绘制行业涨跌幅条形图"""
-        if not self.sectors_data:
+        if not sectors_data:
             return
             
         # 提取数据
-        sector_names = [s["name"] for s in self.sectors_data]
-        changes = [s["change_pct"] for s in self.sectors_data]
+        sector_names = [s["name"] for s in sectors_data]
+        changes = [s["change_pct"] for s in sectors_data]
         
         # 设置颜色
-        colors = ['red' if x > 0 else 'green' for x in changes]
+        colors = ['#FF4D4D' if x > 0 else '#00CC66' for x in changes]
         
-        # 绘制条形图
-        bars = self.ax.bar(sector_names, changes, color=colors)
+        # 绘制条形图 - 添加pick=True使条形可点击
+        bars = self.ax.bar(sector_names, changes, color=colors, alpha=0.8, picker=True)
         
         # 添加数据标签
         for bar, change in zip(bars, changes):
             height = bar.get_height()
-            self.ax.annotate(f'{change:.2f}%',
-                             xy=(bar.get_x() + bar.get_width() / 2, height),
-                             xytext=(0, 3),  # 3 points vertical offset
-                             textcoords="offset points",
-                             ha='center', va='bottom')
+            if height != 0:  # 避免在0处显示标签
+                self.ax.annotate(f'{change:+.2f}%',
+                                xy=(bar.get_x() + bar.get_width() / 2, height),
+                                xytext=(0, 3 if height > 0 else -10),  # 根据正负值调整位置
+                                textcoords="offset points",
+                                ha='center', va='bottom' if height > 0 else 'top',
+                                fontweight='bold')
         
         # 设置标题和标签
-        self.ax.set_title('行业涨跌幅比较')
-        self.ax.set_ylabel('涨跌幅 (%)')
-        self.ax.set_ylim([min(min(changes) * 1.2, -0.5), max(max(changes) * 1.2, 0.5)])
+        self.ax.set_title('行业涨跌幅比较', fontsize=12, fontweight='bold')
+        self.ax.set_ylabel('涨跌幅 (%)', fontsize=10)
+        
+        # 设置y轴范围，确保有足够空间显示标签
+        y_min = min(min(changes) * 1.2, -0.5)
+        y_max = max(max(changes) * 1.2, 0.5)
+        padding = (y_max - y_min) * 0.1  # 添加10%的padding
+        self.ax.set_ylim([y_min - padding, y_max + padding])
+        
+        # 添加水平基线
+        self.ax.axhline(y=0, color='black', linestyle='-', alpha=0.3)
         
         # 旋转x轴标签，使其不重叠
-        plt.setp(self.ax.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(self.ax.get_xticklabels(), rotation=45, ha='right', fontsize=9)
         
-    def _draw_sector_heatmap(self):
+        # 添加网格线使图表更清晰
+        self.ax.grid(axis='y', linestyle='--', alpha=0.4)
+        
+        # 美化图表
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        
+    def _draw_sector_heatmap(self, sectors_data):
         """绘制行业热度热图"""
-        if not self.sectors_data:
+        if not sectors_data:
             return
             
         # 创建热度数据 - 将涨跌幅转换为热度值
-        sector_names = [s["name"] for s in self.sectors_data]
-        changes = [s["change_pct"] for s in self.sectors_data]
+        sector_names = [s["name"] for s in sectors_data]
+        changes = [s["change_pct"] for s in sectors_data]
         
         # 创建数据框架
         df = pd.DataFrame({'sector': sector_names, 'change': changes})
         
-        # 计算热度 (可基于涨跌幅和其他因素)
-        df['heat'] = df['change'].apply(lambda x: min(100, max(0, (x + 5) * 10)))
+        # 计算热度 (基于涨跌幅，最小0，最大100)
+        max_change = max(abs(max(changes)), abs(min(changes))) if changes else 1
+        df['heat'] = df['change'].apply(lambda x: 50 + (x / max_change) * 50 if max_change else 50)
         
         # 生成热图矩阵
         matrix = np.zeros((1, len(sector_names)))
@@ -537,39 +678,47 @@ class SectorChart(QWidget):
             matrix[0, i] = heat
             
         # 绘制热图
-        im = self.ax.imshow(matrix, cmap='RdYlGn', aspect='auto')
+        im = self.ax.imshow(matrix, cmap='RdYlGn', aspect='auto', vmin=0, vmax=100)
         
-        # 添加标签
+        # 添加标签和值
         self.ax.set_xticks(range(len(sector_names)))
         self.ax.set_xticklabels(sector_names)
         self.ax.set_yticks([])  # 不显示y轴刻度
         
+        # 在每个单元格上添加涨跌幅
+        for i, change in enumerate(changes):
+            self.ax.text(i, 0, f"{change:+.2f}%", ha="center", va="center", 
+                       color="black" if 30 < df['heat'][i] < 70 else "white",
+                       fontweight="bold", fontsize=9)
+        
         # 旋转x轴标签
-        plt.setp(self.ax.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(self.ax.get_xticklabels(), rotation=45, ha='right', fontsize=9)
         
         # 添加标题
-        self.ax.set_title('行业热度分析')
+        self.ax.set_title('行业热度分析', fontsize=12, fontweight='bold')
         
         # 添加颜色条
-        self.figure.colorbar(im, ax=self.ax, orientation='horizontal', pad=0.2)
+        cbar = self.figure.colorbar(im, ax=self.ax, orientation='horizontal', pad=0.2, 
+                                 ticks=[0, 25, 50, 75, 100])
+        cbar.set_label('热度 (下跌 ← 中性 → 上涨)', fontsize=9)
         
-    def _draw_sector_rotation_chart(self):
+    def _draw_sector_rotation_chart(self, sectors_data):
         """绘制行业轮动分析图"""
-        if not self.sectors_data:
+        if not sectors_data:
             return
             
-        # 设置一些模拟的历史数据来展示轮动
-        # 实际应用中应从数据库或市场状态获取数据
-        sector_names = [s["name"] for s in self.sectors_data]
-        current_changes = [s["change_pct"] for s in self.sectors_data]
+        # 获取当前数据
+        sector_names = [s["name"] for s in sectors_data]
+        current_changes = [s["change_pct"] for s in sectors_data]
         
-        # 模拟历史轮动数据 (3个时间点)
-        # 实际环境应替换为真实历史数据
+        # 模拟历史轮动数据 (4个时间点)
+        # 使用随机种子，但基于当前数据生成合理的历史数据
         np.random.seed(42)  # 固定种子以获得可重复的结果
         historical_changes = []
         for i in range(3):
+            # 生成与当前涨跌幅相关但有波动的历史数据
             historical_changes.append([
-                (c + np.random.uniform(-2, 2)) for c in current_changes
+                c * (0.7 + 0.6 * np.random.random()) for c in current_changes
             ])
         
         # 创建时间标签
@@ -581,15 +730,96 @@ class SectorChart(QWidget):
         # 绘制折线图
         for i, sector in enumerate(sector_names):
             sector_perf = [data[i] for data in all_data]
-            self.ax.plot(time_periods, sector_perf, marker='o', label=sector)
+            line, = self.ax.plot(time_periods, sector_perf, marker='o', linewidth=2, 
+                               label=sector, picker=5)  # 启用点击事件
+            
+            # 在最后一个点添加标签
+            self.ax.annotate(f"{sector}: {sector_perf[-1]:+.2f}%",
+                           xy=(time_periods[-1], sector_perf[-1]),
+                           xytext=(10, 0),
+                           textcoords="offset points",
+                           fontsize=8,
+                           va='center')
         
-        # 添加图例
-        self.ax.legend(loc='best', fontsize='small')
+        # 添加图例 - 使用小字体并放在图表外部
+        self.ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), 
+                      ncol=3, fontsize='small', frameon=True, fancybox=True, shadow=True)
         
         # 设置标题和标签
-        self.ax.set_title('行业轮动分析')
-        self.ax.set_ylabel('涨跌幅 (%)')
+        self.ax.set_title('行业轮动分析', fontsize=12, fontweight='bold')
+        self.ax.set_ylabel('涨跌幅 (%)', fontsize=10)
         self.ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # 美化图表
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        
+    def _draw_sector_bubble_chart(self, sectors_data):
+        """绘制行业热点气泡图"""
+        if not sectors_data:
+            return
+            
+        # 提取数据
+        sector_names = [s["name"] for s in sectors_data]
+        sector_changes = [s["change_pct"] for s in sectors_data]
+        leader_changes = [s["leading_change"] for s in sectors_data]
+        
+        # 计算气泡大小 (基于行业和龙头股涨跌幅的综合指标)
+        bubble_sizes = []
+        for i in range(len(sectors_data)):
+            # 综合指标：行业涨跌幅和龙头股涨跌幅的加权平均
+            combined_score = (sector_changes[i] * 0.4 + leader_changes[i] * 0.6)
+            # 转换为气泡大小 (最小50，最大500)
+            size = max(50, min(500, 200 + combined_score * 40))
+            bubble_sizes.append(size)
+        
+        # 设置气泡颜色 (红色表示上涨，绿色表示下跌)
+        colors = ['#FF4D4D' if x > 0 else '#00CC66' for x in sector_changes]
+        alphas = [min(0.9, max(0.3, abs(c)/max(0.01, max(abs(min(sector_changes)), abs(max(sector_changes)))))) 
+                 for c in sector_changes]
+        
+        # 创建散点气泡图 - X轴为行业涨跌幅，Y轴为龙头股涨跌幅
+        scatter = self.ax.scatter(sector_changes, leader_changes, s=bubble_sizes, c=colors, 
+                                alpha=alphas, edgecolors='black', linewidths=1, picker=True)
+        
+        # 添加气泡标签
+        for i, sector in enumerate(sector_names):
+            self.ax.annotate(sector,
+                           xy=(sector_changes[i], leader_changes[i]),
+                           xytext=(0, 0),
+                           textcoords="offset points",
+                           fontsize=9,
+                           ha='center', va='center',
+                           bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+        
+        # 添加坐标轴标签
+        self.ax.set_xlabel('行业整体涨跌幅 (%)', fontsize=10)
+        self.ax.set_ylabel('龙头股涨跌幅 (%)', fontsize=10)
+        self.ax.set_title('行业热点分析图', fontsize=12, fontweight='bold')
+        
+        # 添加参考线
+        self.ax.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+        self.ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
+        
+        # 添加四象限标签
+        max_x = max(abs(min(sector_changes)), abs(max(sector_changes))) * 1.1
+        max_y = max(abs(min(leader_changes)), abs(max(leader_changes))) * 1.1
+        
+        self.ax.text(max_x*0.7, max_y*0.7, "龙头强\n行业强", ha='center', va='center', 
+                   bbox=dict(facecolor='lightgreen', alpha=0.3), fontsize=8)
+        self.ax.text(-max_x*0.7, max_y*0.7, "龙头强\n行业弱", ha='center', va='center', 
+                   bbox=dict(facecolor='lightblue', alpha=0.3), fontsize=8)
+        self.ax.text(max_x*0.7, -max_y*0.7, "龙头弱\n行业强", ha='center', va='center', 
+                   bbox=dict(facecolor='lightblue', alpha=0.3), fontsize=8)
+        self.ax.text(-max_x*0.7, -max_y*0.7, "龙头弱\n行业弱", ha='center', va='center', 
+                   bbox=dict(facecolor='mistyrose', alpha=0.3), fontsize=8)
+        
+        # 设置坐标轴范围
+        self.ax.set_xlim([-max_x, max_x])
+        self.ax.set_ylim([-max_y, max_y])
+        
+        # 添加网格
+        self.ax.grid(True, linestyle='--', alpha=0.4)
 
 
 class MarketAnalysisPanel(QFrame):
@@ -682,6 +912,26 @@ class MarketAnalysisPanel(QFrame):
     
     def update_analysis(self, sectors, market_analysis):
         """更新行业分析和市场热点数据"""
+        # 检查sectors是否为空或None
+        if not sectors:
+            # 创建一条友好的提示信息
+            empty_message = "<p style='font-size: 14px; color: #666; text-align: center; margin-top: 30px;'>暂无行业数据，可能原因：</p>"
+            empty_message += "<ul style='font-size: 13px; color: #666; margin-top: 10px;'>"
+            empty_message += "<li>所选股票池没有行业分类数据</li>"
+            empty_message += "<li>尚未加载或初始化行业分类</li>"
+            empty_message += "<li>行业分类文件可能损坏或格式不正确</li>"
+            empty_message += "</ul>"
+            empty_message += "<p style='font-size: 13px; color: #666; text-align: center; margin-top: 15px;'>请尝试更换股票池或检查行业分类文件。</p>"
+            
+            self.market_analysis_text.setHtml(empty_message)
+            
+            # 清空行业表格
+            self.sector_table.setRowCount(0)
+            
+            # 清空图表
+            self.sector_chart.set_data([])
+            return
+        
         # 更新行业表格
         self.sector_table.setRowCount(len(sectors))
         
@@ -714,7 +964,135 @@ class MarketAnalysisPanel(QFrame):
         self.sector_chart.set_data(sectors)
         
         # 更新市场分析文本
-        self.market_analysis_text.setHtml(market_analysis)
+        if market_analysis:
+            self.market_analysis_text.setHtml(market_analysis)
+        else:
+            # 如果没有提供分析文本，生成一个默认的市场分析
+            market_html = self._generate_market_analysis(sectors)
+            self.market_analysis_text.setHtml(market_html)
+            
+    def _generate_market_analysis(self, sectors):
+        """
+        生成市场分析内容，当没有提供市场分析文本时使用
+        """
+        if not sectors:
+            return """
+            <h3>市场概览</h3>
+            <p>暂无市场数据。</p>
+            """
+            
+        # 计算整体情况
+        sector_count = len(sectors)
+        up_sectors = 0
+        down_sectors = 0
+        flat_sectors = 0
+        total_change = 0
+        
+        # 行业变化百分比列表
+        sector_changes = []
+        
+        for sector_name, sector_data in sectors.items():
+            # 提取变化百分比
+            change_percent = sector_data.get('change_percent', 0)
+            sector_changes.append((sector_name, change_percent))
+            
+            # 统计涨跌家数
+            if change_percent > 0.5:  # 涨幅超过0.5%视为上涨
+                up_sectors += 1
+            elif change_percent < -0.5:  # 跌幅超过0.5%视为下跌
+                down_sectors += 1
+            else:
+                flat_sectors += 1
+                
+            # 累计总变化
+            total_change += change_percent
+            
+        # 计算平均变化
+        avg_change = total_change / sector_count if sector_count > 0 else 0
+        
+        # 按涨幅排序行业
+        sector_changes.sort(key=lambda x: x[1], reverse=True)
+        
+        # 获取前3个上涨最多的行业
+        top_sectors = sector_changes[:3]
+        
+        # 获取后3个下跌最多的行业
+        bottom_sectors = sector_changes[-3:]
+        
+        # 格式化时间
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # 构建市场概览
+        market_overview = f"""
+        <h3>市场概览 ({now})</h3>
+        <p>目前市场整体呈现<span style="color: {"red" if avg_change > 0 else "green"}; font-weight: bold;">
+        {("上涨" if avg_change > 0 else "下跌") if avg_change != 0 else "持平"}
+        </span>态势，平均涨幅 <span style="color: {"red" if avg_change > 0 else "green"}; font-weight: bold;">
+        {avg_change:.2f}%</span>。</p>
+        
+        <p>在监测的{sector_count}个行业中，{up_sectors}个上涨，{down_sectors}个下跌，{flat_sectors}个基本持平。</p>
+        """
+        
+        # 构建行业热点分析
+        if top_sectors:
+            hotspot_analysis = "<h3>行业热点分析</h3><ul>"
+            
+            for sector_name, change in top_sectors:
+                sector_data = sectors.get(sector_name, {})
+                leading_stock = sector_data.get('leading_stock', {})
+                leading_symbol = leading_stock.get('symbol', '')
+                leading_change = leading_stock.get('change_percent', 0) * 100
+                
+                hotspot_analysis += f"""
+                <li><strong>{sector_name}</strong>: 上涨 <span style="color: red;">{change:.2f}%</span> 
+                龙头股 {leading_symbol} {leading_change:.2f}%</li>
+                """
+                
+            hotspot_analysis += "</ul>"
+        else:
+            hotspot_analysis = "<h3>行业热点分析</h3><p>暂无明显热点行业。</p>"
+            
+        # 构建投资机会分析
+        if top_sectors:
+            opportunity_analysis = "<h3>投资机会分析</h3><ul>"
+            
+            for sector_name, change in top_sectors:
+                sector_data = sectors.get(sector_name, {})
+                stocks = sector_data.get('stocks', [])
+                
+                # 提取行业内表现良好的股票
+                if stocks and isinstance(stocks, list):
+                    stock_str = ', '.join(stocks[:3])
+                    opportunity_analysis += f"""
+                    <li><strong>{sector_name}</strong>: 可关注 {stock_str}</li>
+                    """
+                    
+            opportunity_analysis += "</ul>"
+        else:
+            opportunity_analysis = "<h3>投资机会分析</h3><p>暂无明显投资机会。</p>"
+            
+        # 构建风险提示
+        if bottom_sectors:
+            risk_analysis = "<h3>风险提示</h3><ul>"
+            
+            for sector_name, change in bottom_sectors:
+                risk_analysis += f"""
+                <li><strong>{sector_name}</strong>: 下跌 <span style="color: green;">{change:.2f}%</span>，建议谨慎操作</li>
+                """
+                
+            risk_analysis += "</ul>"
+        else:
+            risk_analysis = "<h3>风险提示</h3><p>暂无明显风险行业。</p>"
+            
+        # 合并所有分析
+        full_analysis = f"""
+        {market_overview}
+        {hotspot_analysis}
+        {opportunity_analysis}
+        {risk_analysis}
+        """
+        
+        return full_analysis
 
 
 class SetoMainWindow(QMainWindow):
@@ -1276,6 +1654,18 @@ class SetoMainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("系统就绪")
+        
+        # 在方法结束前添加：
+        # 尝试使用新的数据连接器替换定时器
+        try:
+            if 'market_data_connector' in globals():
+                self.data_connector = replace_timer_with_connector(self)
+                logger.info("已启用事件驱动数据更新机制")
+            else:
+                logger.info("使用传统定时器更新机制")
+        except Exception as e:
+            logger.error(f"初始化数据连接器失败: {e}")
+            logger.info("回退到传统定时器更新机制")
     
     def initialize_market_state(self, data_dir='data/market', universe='test'):
         """初始化市场状态"""
@@ -1307,7 +1697,7 @@ class SetoMainWindow(QMainWindow):
                 self._update_realtime_data()
             
             # 更新状态栏显示当前模式
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # 根据不同模式显示不同的状态栏信息
             if self.current_mode == "回测":
@@ -1336,6 +1726,7 @@ class SetoMainWindow(QMainWindow):
             "up_count": 0,  # 稍后更新
             "down_count": 0,  # 稍后更新
             "avg_change": 0.0,  # 稍后更新
+            "volatility": 0.0,  # 添加波动率字段
             "total_volume": random.randint(50000000, 150000000)  # 模拟历史数据
         }
         
@@ -1350,11 +1741,11 @@ class SetoMainWindow(QMainWindow):
             "医药": random.uniform(-1.5, 2.5),
             "能源": random.uniform(-2.5, 2.5),
             "工业": random.uniform(-1.8, 1.8),
-            "未知": random.uniform(-1.0, 1.0)
+            "未分类": random.uniform(-1.0, 1.0)
         }
         
         # 获取当前时间作为变化因子
-        time_factor = datetime.datetime.now().second / 60.0  # 0-1之间变化
+        time_factor = datetime.now().second / 60.0  # 0-1之间变化
         
         # 更新所有股票的价格和涨跌幅
         up_count = 0
@@ -1364,51 +1755,61 @@ class SetoMainWindow(QMainWindow):
         # 按行业分组的股票数据，用于更新智能分析面板
         sector_performance = {}
         
+        # 确保所有股票都有行业分类
         for symbol, data in self.backtest_stock_data.items():
-            # 股票特定的随机种子，使得相同股票在同一时间点的变化是一致的
-            seed = sum(ord(c) for c in symbol) + int(time_factor * 100)
-            random.seed(seed)
+            if not data.get('sector'):
+                if symbol in self.stock_sectors:
+                    data['sector'] = self.stock_sectors[symbol]
+                elif hasattr(self.market_state, 'stock_sectors') and symbol in self.market_state.stock_sectors:
+                    data['sector'] = self.market_state.stock_sectors[symbol]
+                else:
+                    data['sector'] = "未分类"
+        
+        # 更新所有股票的数据
+        for symbol, data in self.backtest_stock_data.items():
+            # 获取股票行业，没有的设为"未分类"
+            sector = data.get('sector', "未分类")
             
-            # 获取股票行业和波动性
-            sector = data.get("sector", "未知")
-            volatility = data.get("volatility", 1.0)
+            # 生成股票特定因子（每只股票的个性表现）
+            stock_factor = random.uniform(-1.5, 1.5)
             
-            # 计算行业因子影响
-            sector_impact = sector_factors.get(sector, 0) * 0.5  # 行业因子贡献度
+            # 基础价格
+            base_price = data.get('base_price', random.uniform(10, 100))
             
-            # 计算价格变动 - 结合行业因子、个股波动性和随机因子
-            random_factor = random.uniform(-2.0, 2.0)  # 随机成分
-            price_change_pct = (random_factor + sector_impact) * volatility
+            # 结合行业和个股因子计算价格变化幅度
+            sector_factor = sector_factors.get(sector, sector_factors["未分类"])
+            change_pct = (sector_factor * 0.7 + stock_factor * 0.3) * 0.01 * (0.5 + time_factor)
             
-            # 价格变动范围控制在 [-6%, +6%]
-            price_change_pct = max(min(price_change_pct, 6.0), -6.0)
+            # 更新价格
+            old_price = data.get('price', base_price)
+            new_price = old_price * (1 + change_pct)
+            new_price = max(new_price, base_price * 0.5)  # 确保价格不会太低
             
-            # 计算新价格
-            new_price = data["base_price"] * (1 + price_change_pct/100)
+            # 更新股票数据
+            data['price'] = new_price
+            data['change'] = new_price - old_price
+            data['change_pct'] = change_pct
             
-            # 更新涨跌幅（相对于初始价格）
-            change_pct = price_change_pct
-            
-            # 更新数据
-            self.backtest_stock_data[symbol]["price"] = new_price
-            self.backtest_stock_data[symbol]["change_pct"] = change_pct
+            # 加入股票列表
+            stock_data.append({
+                'symbol': symbol,
+                'name': data.get('name', symbol),
+                'price': new_price,
+                'change': new_price - old_price,
+                'change_pct': change_pct,
+                'volume': random.randint(10000, 1000000),
+                'turnover_ratio': random.uniform(0.5, 5.0),
+                'pe_ratio': random.uniform(8, 40),
+                'sector': sector
+            })
             
             # 统计上涨下跌
             if change_pct > 0:
                 up_count += 1
-            elif change_pct < 0:
+            else:
                 down_count += 1
             
             total_change += change_pct
-            
-            # 添加到显示数据
-            stock_data.append({
-                "symbol": data["symbol"],
-                "name": data["name"],
-                "price": new_price,
-                "change_pct": change_pct,
-                "sector": sector  # 添加行业信息
-            })
             
             # 更新行业表现统计
             if sector not in sector_performance:
@@ -1422,7 +1823,7 @@ class SetoMainWindow(QMainWindow):
             sector_performance[sector]["count"] += 1
             sector_performance[sector]["stocks"].append({
                 "symbol": symbol,
-                "name": data["name"],
+                "name": data.get("name", symbol),
                 "change_pct": change_pct
             })
         
@@ -1433,6 +1834,9 @@ class SetoMainWindow(QMainWindow):
         market_summary["up_count"] = up_count
         market_summary["down_count"] = down_count
         market_summary["avg_change"] = total_change / len(stock_data) if stock_data else 0.0
+        # 计算波动率（使用价格变化的标准差）
+        changes = [data["change_pct"] for data in stock_data]
+        market_summary["volatility"] = np.std(changes) if changes else 0.0
         
         # 更新市场状态面板
         self.market_panel.update_market_data(market_summary)
@@ -1724,7 +2128,7 @@ class SetoMainWindow(QMainWindow):
                 
             # 2. 更新算法交易面板状态
             # 模拟算法监测到的市场信号
-            current_time = datetime.datetime.now().strftime("%H:%M:%S")
+            current_time = datetime.now().strftime("%H:%M:%S")
             
             # 模拟市场信号
             if random.random() > 0.7:  # 30%概率生成新信号
@@ -1826,7 +2230,7 @@ class SetoMainWindow(QMainWindow):
             # 4. 更新系统进化面板
             # 在实际应用中，这里会收集系统进化的历史数据和当前进化状态
             # 本例中简单模拟一些数据更新
-            current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            current_date = datetime.now().strftime("%Y-%m-%d")
             iteration = random.randint(30, 50)
             performance_change = random.uniform(-1.0, 5.0)
             
@@ -2130,27 +2534,51 @@ class SetoMainWindow(QMainWindow):
         if os.path.exists(sectors_file):
             try:
                 with open(sectors_file, 'r', encoding='utf-8') as f:
-                    self.stock_sectors = json.load(f)
+                    sector_data = json.load(f)
+                    
+                # 格式为: {"股票代码": {"sector": "行业名称"}, ...}
+                self.stock_sectors = {}
+                for symbol, data in sector_data.items():
+                    if 'sector' in data:
+                        self.stock_sectors[symbol] = data['sector']
+                
+                # 确保所有行情数据中的股票都有行业信息
+                if hasattr(self, 'market_state') and self.market_state:
+                    for symbol in self.market_state.symbols:
+                        if symbol not in self.stock_sectors:
+                            self.stock_sectors[symbol] = "未分类"
+                
                 logger.info(f"成功加载股票行业信息，共 {len(self.stock_sectors)} 只股票")
             except Exception as e:
                 logger.error(f"加载股票行业信息失败: {e}")
+                self._set_default_sectors()
         else:
             logger.warning("股票行业信息文件不存在，将使用默认行业分类")
-            # 设置一些默认行业分类
-            default_sectors = {
-                '000001.SZ': {"sector": "金融"}, 
-                '600000.SH': {"sector": "金融"},
-                '600036.SH': {"sector": "金融"},
-                '601318.SH': {"sector": "金融"},
-                '000858.SZ': {"sector": "消费"},
-                '600519.SH': {"sector": "消费"},
-                '000651.SZ': {"sector": "消费"},
-                '000333.SZ': {"sector": "消费"},
-                '601888.SH': {"sector": "消费"},
-                '600276.SH': {"sector": "医药"},
-                '002415.SZ': {"sector": "科技"}
-            }
-            self.stock_sectors = default_sectors
+            self._set_default_sectors()
+    
+    def _set_default_sectors(self):
+        """设置默认行业分类"""
+        # 设置一些默认行业分类
+        default_sectors = {
+            '000001.SZ': "金融", 
+            '600000.SH': "金融",
+            '600036.SH': "金融",
+            '601318.SH': "金融",
+            '000858.SZ': "消费",
+            '600519.SH': "消费",
+            '000651.SZ': "消费",
+            '000333.SZ': "消费",
+            '601888.SH': "消费",
+            '600276.SH': "医药",
+            '002415.SZ': "科技"
+        }
+        self.stock_sectors = default_sectors
+        
+        # 确保所有行情数据中的股票都有行业信息
+        if hasattr(self, 'market_state') and self.market_state:
+            for symbol in self.market_state.symbols:
+                if symbol not in self.stock_sectors:
+                    self.stock_sectors[symbol] = "未分类"
     
     def change_stock_pool(self, pool_name):
         """切换当前股票池"""
@@ -2789,119 +3217,224 @@ class SetoMainWindow(QMainWindow):
     
     def _create_portfolio_value_chart(self, returns_data):
         """创建投资组合价值图表"""
-        # 创建图表
-        chart = QChart()
-        chart.setTitle("投资组合价值曲线")
-        
-        # 创建价值曲线序列
-        value_series = QLineSeries()
-        value_series.setName("资产价值")
-        
-        # 添加数据点
-        for i, data_point in enumerate(returns_data):
-            value_series.append(i, data_point['value'])
-        
-        # 添加到图表
-        chart.addSeries(value_series)
-        
-        # 创建坐标轴
-        x_axis = QValueAxis()
-        x_axis.setTitleText("日期")
-        x_axis.setRange(0, len(returns_data) - 1)
-        
-        y_axis = QValueAxis()
-        y_axis.setTitleText("价值")
-        min_value = min([data_point['value'] for data_point in returns_data]) * 0.95
-        max_value = max([data_point['value'] for data_point in returns_data]) * 1.05
-        y_axis.setRange(min_value, max_value)
-        
-        chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
-        chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
-        
-        value_series.attachAxis(x_axis)
-        value_series.attachAxis(y_axis)
-        
-        # 创建视图
-        chart_view = QChartView(chart)
-        chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        return chart_view
+        if not HAS_QT_CHARTS:
+            # 使用matplotlib作为替代方案
+            fig = Figure(figsize=(8, 5), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # 提取数据
+            values = [point['value'] for point in returns_data]
+            dates = list(range(len(values)))
+            
+            # 绘制曲线
+            ax.plot(dates, values, 'b-', linewidth=2)
+            
+            # 设置标题和标签
+            ax.set_title('投资组合价值曲线')
+            ax.set_xlabel('日期')
+            ax.set_ylabel('价值')
+            
+            # 添加网格线
+            ax.grid(True, linestyle='--', alpha=0.7)
+            
+            # 创建画布
+            canvas = FigureCanvas(fig)
+            
+            # 创建一个简单的包装器，使接口与QChartView类似
+            container = QWidget()
+            layout = QVBoxLayout(container)
+            layout.addWidget(canvas)
+            
+            return container
+        else:
+            # 使用QChart库
+            # 创建图表
+            chart = QChart()
+            chart.setTitle("投资组合价值曲线")
+            
+            # 创建价值曲线序列
+            value_series = QLineSeries()
+            value_series.setName("资产价值")
+            
+            # 添加数据点
+            for i, data_point in enumerate(returns_data):
+                value_series.append(i, data_point['value'])
+            
+            # 添加到图表
+            chart.addSeries(value_series)
+            
+            # 创建坐标轴
+            x_axis = QValueAxis()
+            x_axis.setTitleText("日期")
+            x_axis.setRange(0, len(returns_data) - 1)
+            
+            y_axis = QValueAxis()
+            y_axis.setTitleText("价值")
+            min_value = min([data_point['value'] for data_point in returns_data]) * 0.95
+            max_value = max([data_point['value'] for data_point in returns_data]) * 1.05
+            y_axis.setRange(min_value, max_value)
+            
+            chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
+            chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
+            
+            value_series.attachAxis(x_axis)
+            value_series.attachAxis(y_axis)
+            
+            # 创建视图
+            chart_view = QChartView(chart)
+            chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            return chart_view
     
     def _create_sector_performance_chart(self, sector_returns):
         """创建行业表现图表"""
-        # 创建图表
-        chart = QChart()
-        chart.setTitle("行业表现")
-        
-        # 为每个行业创建一个序列
-        for sector_name, returns in sector_returns.items():
-            if not returns:
-                continue
+        if not HAS_QT_CHARTS:
+            # 使用matplotlib作为替代方案
+            fig = Figure(figsize=(8, 5), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # 为每个行业创建一条线
+            for sector_name, returns in sector_returns.items():
+                if not returns:
+                    continue
                 
-            series = QLineSeries()
-            series.setName(sector_name)
+                # 计算累计回报
+                cumulative_returns = []
+                cum_return = 1.0
+                for data_point in returns:
+                    cum_return *= (1 + data_point['return'])
+                    cumulative_returns.append(cum_return)
+                
+                # 绘制曲线
+                ax.plot(range(len(cumulative_returns)), cumulative_returns, label=sector_name, linewidth=2)
             
-            # 添加累计回报数据点
-            cumulative_return = 1.0
-            for i, data_point in enumerate(returns):
-                cumulative_return *= (1 + data_point['return'])
-                series.append(i, cumulative_return)
+            # 设置标题和标签
+            ax.set_title('行业表现')
+            ax.set_xlabel('日期')
+            ax.set_ylabel('累计回报')
             
-            chart.addSeries(series)
-        
-        # 创建坐标轴
-        x_axis = QValueAxis()
-        x_axis.setTitleText("日期")
-        max_length = max([len(returns) for returns in sector_returns.values()]) if sector_returns else 0
-        x_axis.setRange(0, max_length - 1)
-        
-        y_axis = QValueAxis()
-        y_axis.setTitleText("累计回报")
-        y_axis.setRange(0.5, 2.0)  # 假设回报在-50%到+100%之间
-        
-        chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
-        chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
-        
-        # 将所有系列附加到轴上
-        for series in chart.series():
-            series.attachAxis(x_axis)
-            series.attachAxis(y_axis)
-        
-        # 创建视图
-        chart_view = QChartView(chart)
-        chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        return chart_view
+            # 添加图例
+            ax.legend(loc='upper left', frameon=True)
+            
+            # 添加网格线
+            ax.grid(True, linestyle='--', alpha=0.7)
+            
+            # 创建画布
+            canvas = FigureCanvas(fig)
+            
+            # 创建一个简单的包装器，使接口与QChartView类似
+            container = QWidget()
+            layout = QVBoxLayout(container)
+            layout.addWidget(canvas)
+            
+            return container
+        else:
+            # 使用QChart库
+            # 创建图表
+            chart = QChart()
+            chart.setTitle("行业表现")
+            
+            # 为每个行业创建一个序列
+            for sector_name, returns in sector_returns.items():
+                if not returns:
+                    continue
+                    
+                series = QLineSeries()
+                series.setName(sector_name)
+                
+                # 添加累计回报数据点
+                cumulative_return = 1.0
+                for i, data_point in enumerate(returns):
+                    cumulative_return *= (1 + data_point['return'])
+                    series.append(i, cumulative_return)
+                
+                chart.addSeries(series)
+            
+            # 创建坐标轴
+            x_axis = QValueAxis()
+            x_axis.setTitleText("日期")
+            max_length = max([len(returns) for returns in sector_returns.values()]) if sector_returns else 0
+            x_axis.setRange(0, max_length - 1)
+            
+            y_axis = QValueAxis()
+            y_axis.setTitleText("累计回报")
+            y_axis.setRange(0.5, 2.0)  # 假设回报在-50%到+100%之间
+            
+            chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
+            chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
+            
+            # 将所有系列附加到轴上
+            for series in chart.series():
+                series.attachAxis(x_axis)
+                series.attachAxis(y_axis)
+            
+            # 创建视图
+            chart_view = QChartView(chart)
+            chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            return chart_view
     
     def _create_sector_allocation_chart(self, sector_allocations):
         """创建行业配置图表"""
-        # 创建图表
-        chart = QChart()
-        chart.setTitle("行业资金配置")
-        
-        # 为展示最近的配置,使用饼图
-        pie_series = QPieSeries()
-        
         # 获取最近一次配置
         last_allocations = {}
         for sector_name, allocations in sector_allocations.items():
             if allocations:
                 last_allocations[sector_name] = allocations[-1]['allocation']
         
-        # 添加数据到饼图
-        for sector_name, allocation in last_allocations.items():
-            if allocation > 0:
-                slice = pie_series.append(sector_name, allocation)
-                slice.setLabelVisible(True)
-                slice.setLabel(f"{sector_name}: {allocation:.1%}")
-        
-        chart.addSeries(pie_series)
-        
-        # 创建视图
-        chart_view = QChartView(chart)
-        chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        return chart_view
+        if not HAS_QT_CHARTS:
+            # 使用matplotlib作为替代方案
+            fig = Figure(figsize=(8, 6), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # 提取数据
+            sectors = []
+            values = []
+            for sector_name, allocation in last_allocations.items():
+                if allocation > 0:
+                    sectors.append(sector_name)
+                    values.append(allocation)
+            
+            # 创建饼图
+            if values:
+                ax.pie(values, labels=sectors, autopct='%1.1f%%', shadow=True, startangle=90)
+                ax.axis('equal')  # 确保饼图是圆的
+            
+            # 设置标题
+            ax.set_title('行业资金配置')
+            
+            # 创建画布
+            canvas = FigureCanvas(fig)
+            
+            # 创建一个简单的包装器，使接口与QChartView类似
+            container = QWidget()
+            layout = QVBoxLayout(container)
+            layout.addWidget(canvas)
+            
+            return container
+        else:
+            # 使用QChart库
+            # 创建图表
+            chart = QChart()
+            chart.setTitle("行业资金配置")
+            
+            # 为展示最近的配置,使用饼图
+            pie_series = QPieSeries()
+            
+            # 添加数据到饼图
+            for sector_name, allocation in last_allocations.items():
+                if allocation > 0:
+                    slice = pie_series.append(sector_name, allocation)
+                    slice.setLabelVisible(True)
+                    slice.setLabel(f"{sector_name}: {allocation:.1%}")
+            
+            chart.addSeries(pie_series)
+            
+            # 创建视图
+            chart_view = QChartView(chart)
+            chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            return chart_view
     
     def test_industry_leader_strategy(self):
         """测试行业龙头策略"""
@@ -3095,6 +3628,120 @@ class SetoMainWindow(QMainWindow):
         
         result_dialog.setLayout(layout)
         result_dialog.exec()
+
+    def on_market_data_updated(self, market_summary: Dict[str, Any]) -> None:
+        """
+        处理市场数据更新事件
+        
+        Args:
+            market_summary: 市场摘要数据字典
+        """
+        try:
+            # 更新市场状态面板
+            self.market_panel.update_market_data(market_summary)
+            
+            # 获取股票数据并更新列表
+            symbols = self.get_tradable_symbols()
+            stock_data = []
+            
+            for symbol in symbols:
+                if hasattr(self, 'data_connector'):
+                    # 使用数据连接器获取股票数据
+                    data = self.data_connector.get_stock_data(symbol)
+                else:
+                    # 使用传统方式获取数据
+                    if self.current_mode == "回测" and symbol in self.backtest_stock_data:
+                        data = self.backtest_stock_data[symbol]
+                    else:
+                        data = self.market_state.get_stock_data(symbol) if self.market_state else {}
+                
+                if data:  # 确保数据不为空
+                    stock_data.append(data)
+            
+            # 更新股票列表
+            self.stock_list.update_stock_list(stock_data)
+            
+            # 更新交易面板
+            self.trade_panel.update_stock_list(stock_data)
+            
+            # 生成账户和持仓信息（模拟数据）
+            account_info, positions = self._generate_account_data(stock_data)
+            
+            # 更新持仓面板
+            self.portfolio_panel.update_portfolio(account_info, positions)
+            
+            # 更新状态栏
+            current_time = market_summary.get("current_time", datetime.now().strftime("%H:%M:%S"))
+            market_status = market_summary.get("market_status", "未知")
+            self.status_bar.showMessage(f"最后更新: {current_time} | 运行模式: {self.current_mode} | 市场状态: {market_status}")
+            
+        except Exception as e:
+            logger.error(f"处理市场数据更新事件失败: {e}")
+            self.status_bar.showMessage(f"更新失败: {str(e)}")
+    
+    def on_stock_pool_changed(self, pool_name: str, symbols: List[str]) -> None:
+        """
+        处理股票池变更事件
+        
+        Args:
+            pool_name: 股票池名称
+            symbols: 股票代码列表
+        """
+        try:
+            # 更新市场面板的股票池信息
+            self.market_panel.pool_info_label.setText(f"当前股票池: {pool_name}")
+            
+            # 显示提示信息
+            QMessageBox.information(self, "股票池已变更", 
+                                f"已切换到 {pool_name} 股票池，包含 {len(symbols)} 只股票")
+            
+            # 立即更新数据以显示新的股票池中的股票
+            if hasattr(self, 'data_connector'):
+                self.data_connector.update_all_stocks()
+            
+        except Exception as e:
+            logger.error(f"处理股票池变更事件失败: {e}")
+            QMessageBox.warning(self, "操作失败", f"切换股票池时发生错误: {str(e)}")
+    
+    def on_error_occurred(self, error_msg: str) -> None:
+        """
+        处理错误事件
+        
+        Args:
+            error_msg: 错误信息
+        """
+        logger.error(f"发生错误: {error_msg}")
+        QMessageBox.critical(self, "系统错误", f"发生错误: {error_msg}")
+    
+    def get_tradable_symbols(self) -> List[str]:
+        """
+        获取当前可交易的股票列表
+        
+        Returns:
+            股票代码列表
+        """
+        if hasattr(self, 'data_connector'):
+            return self.data_connector.get_tradable_symbols()
+        elif self.market_state:
+            return self.market_state.get_tradable_symbols()
+        return []
+    
+    def closeEvent(self, event):
+        """重写关闭事件处理方法，确保资源正确清理"""
+        try:
+            # 清理数据连接器资源
+            if hasattr(self, 'data_connector'):
+                self.data_connector.cleanup()
+            
+            # 停止定时器
+            if hasattr(self, 'update_timer') and self.update_timer.isActive():
+                self.update_timer.stop()
+                
+        except Exception as e:
+            logger.error(f"清理资源时发生错误: {e}")
+            
+        # 继续标准关闭流程
+        super().closeEvent(event)
 
 
 def start_gui():
