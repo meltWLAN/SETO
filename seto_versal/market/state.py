@@ -574,7 +574,7 @@ class MarketState:
             
     def get_tradable_symbols(self):
         """
-        Get list of currently tradable symbols
+        Get a list of currently tradable symbols
         
         Returns:
             list: List of symbol strings that are currently tradable
@@ -589,8 +589,8 @@ class MarketState:
         
         # 在实盘模式下，检查市场是否开放
         if not self.is_market_open():
-            logger.info("Market is closed, no tradable symbols")
-            return []
+            logger.info("Market is closed, returning all symbols in pool")
+            return list(self.symbols)  # 返回所有股票而不是空列表
         
         # 检查每个股票是否有有效数据
         tradable = []
