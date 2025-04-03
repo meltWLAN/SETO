@@ -22,10 +22,25 @@ A modular, intelligent trading system designed for the Chinese A-share market, c
 8. **Evolution System**: Continuous optimization and strategy refinement
 9. **Narrator**: Human-readable system consciousness output
 
+## Latest Version (v0.7.0)
+
+The latest version includes comprehensive fixes for datetime module issues:
+- Fixed incorrect imports of datetime and timedelta
+- Added system-wide patch for datetime.now() method
+- Fixed type annotations in various files
+- Ensured proper operation of PyQt6 GUI
+
+See FIXES.md for more details on system improvements.
+
 ## Getting Started
 
 ```bash
 pip install -r requirements.txt
+
+# Run the PyQt6 GUI with datetime fixes
+python run_qt_gui.py
+
+# Or run the standard system
 python -m seto_versal.main
 ```
 
@@ -35,4 +50,6 @@ System parameters and philosophy principles are defined in `config.yaml`.
 
 ## Project Status
 
-Under active development. See CHANGELOG.md for updates. 
+Under active development. Current stable version is v0.7.0.
+
+See CHANGELOG.md for previous updates. 
