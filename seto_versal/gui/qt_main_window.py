@@ -1949,82 +1949,83 @@ class SetoMainWindow(QMainWindow):
         pass
     
     def _initialize_backtest_stock_data(self):
-        """初始化回测模式下的股票数据，保证股票代码、名称、价格和涨跌幅一致性"""
-        # 清空旧数据
-        self.backtest_stock_data = {}
-        
-        # 从stock_list.json加载股票列表
-        stock_list_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 
-                                     'data', 'market', 'stock_list.json')
-        
+        """初始化回测股票数据"""
         try:
-            if os.path.exists(stock_list_path):
-                with open(stock_list_path, 'r') as f:
-                    symbols = json.load(f)
-                logger.info(f"从stock_list.json加载了 {len(symbols)} 只股票")
-            else:
-                # 如果文件不存在，使用默认股票列表
-                logger.warning("stock_list.json不存在，使用默认股票列表")
-                symbols = [
-                    '000001.SZ', '000333.SZ', '000651.SZ', '000858.SZ', 
-                    '600000.SH', '600036.SH', '600276.SH', '600519.SH', 
-                    '601318.SH', '601888.SH'
-                ]
-        except Exception as e:
-            logger.error(f"加载股票列表失败: {e}，使用默认股票列表")
-            symbols = [
-                '000001.SZ', '000333.SZ', '000651.SZ', '000858.SZ', 
-                '600000.SH', '600036.SH', '600276.SH', '600519.SH', 
-                '601318.SH', '601888.SH'
+            self.backtest_stock_data = {}
+            
+            # 使用市场状态中的股票列表初始化回测数据
+            # 这确保回测使用的是当前选中的股票池
+            symbols = self.market_state.get_tradable_symbols()
+            
+            # 定义几种常见的股票价格范围和行业分类
+            price_ranges = [
+                (5, 15),     # 小盘股
+                (15, 30),    # 中盘股
+                (30, 60),    # 大盘股
+                (60, 120),   # 蓝筹股
+                (120, 500)   # 白马股
             ]
-        
-        # 生成固定的股票数据
-        for symbol in symbols:
-            # 使用固定种子生成稳定但略有变化的价格
-            seed = sum(ord(c) for c in symbol)
-            random.seed(seed)
             
-            # 获取行业信息
-            sector = self.stock_sectors.get(symbol, {}).get("sector", "未知")
+            sectors = [
+                "金融",
+                "科技",
+                "消费",
+                "医药",
+                "能源",
+                "工业",
+                "未知"
+            ]
             
-            # 根据行业调整基础价格范围（使不同行业有不同特征）
-            if sector == "金融":
-                base_price = random.uniform(5.0, 30.0)  # 金融股通常价格较低
-                volatility = 0.8  # 金融股通常波动性较低
-            elif sector == "科技":
-                base_price = random.uniform(40.0, 180.0)  # 科技股通常价格中等偏高
-                volatility = 1.5  # 科技股通常波动性较高
-            elif sector == "消费":
-                base_price = random.uniform(50.0, 300.0)  # 消费股价格跨度大
-                volatility = 1.0  # 消费股波动适中
-            elif sector == "医药":
-                base_price = random.uniform(30.0, 120.0)  # 医药股价格中等
-                volatility = 1.2  # 医药股波动较大
-            elif sector == "能源":
-                base_price = random.uniform(4.0, 20.0)  # 能源股通常价格较低
-                volatility = 1.3  # 能源股波动较大
-            elif sector == "工业":
-                base_price = random.uniform(8.0, 40.0)  # 工业股价格中低
-                volatility = 1.1  # 工业股波动适中
-            else:
-                base_price = random.uniform(10.0, 200.0)  # 默认价格范围
-                volatility = 1.0  # 默认波动性
+            # 为每个股票生成真实的初始数据
+            for i, symbol in enumerate(symbols):
+                # 确定这个股票属于哪个价格范围
+                price_range_idx = i % len(price_ranges)
+                min_price, max_price = price_ranges[price_range_idx]
+                
+                # 生成基础价格
+                base_price = round(random.uniform(min_price, max_price), 2)
+                
+                # 获取行业信息 - 优先使用市场状态中的行业信息
+                if hasattr(self.market_state, 'get_stock_sectors'):
+                    stock_sectors = self.market_state.get_stock_sectors()
+                    sector = stock_sectors.get(symbol, "未知")
+                else:
+                    # 根据股票代码判断交易所，分配模拟行业
+                    if '.SH' in symbol:
+                        # 上证股票偏向传统行业
+                        sector_idx = i % 4  # 主要分布在金融、能源、工业、未知
+                    else:
+                        # 深证股票偏向成长行业
+                        sector_idx = (i % 3) + 1  # 主要分布在科技、消费、医药
+                    
+                    sector = sectors[sector_idx]
+                
+                # 根据行业特性调整波动性
+                if sector in ["科技", "医药"]:
+                    volatility = random.uniform(1.2, 2.0)  # 成长股波动较大
+                elif sector in ["金融", "能源"]:
+                    volatility = random.uniform(0.8, 1.3)  # 价值股相对稳定
+                else:
+                    volatility = random.uniform(0.9, 1.6)
+                
+                # 获取股票名称 - 先尝试从市场状态获取，获取不到则使用模拟名称
+                name = f"股票{symbol.split('.')[0]}"  # 默认模拟名称
+                
+                # 创建股票数据
+                self.backtest_stock_data[symbol] = {
+                    "symbol": symbol,
+                    "name": name,
+                    "base_price": base_price,
+                    "price": base_price,
+                    "change_pct": 0.0,
+                    "sector": sector,
+                    "volatility": volatility
+                }
             
-            # 保存股票数据
-            self.backtest_stock_data[symbol] = {
-                "symbol": symbol,
-                "name": self.stock_names.get(symbol, f"股票{symbol.split('.')[0]}"),
-                "base_price": base_price,
-                "price": base_price,  # 当前价格，会根据时间略有变化
-                "change_pct": 0.0,  # 初始涨跌幅为0
-                "sector": sector,    # 行业信息
-                "volatility": volatility  # 波动性特征
-            }
+            logger.info(f"初始化回测股票数据成功，共 {len(self.backtest_stock_data)} 只股票")
         
-        # 重置随机种子
-        random.seed()
-        
-        logger.info(f"回测模式初始化了 {len(self.backtest_stock_data)} 只股票数据")
+        except Exception as e:
+            logger.error(f"初始化回测股票数据失败: {e}")
     
     def _initialize_simulation_mode(self):
         """初始化模拟交易模式"""
@@ -2180,10 +2181,14 @@ class SetoMainWindow(QMainWindow):
         if self.market_state and hasattr(self.market_state, "change_stock_pool"):
             success = self.market_state.change_stock_pool(system_pool_name)
             if success:
+                # 重置缓存的股票数据，强制从market_state重新初始化
+                self.backtest_stock_data = {}  # 清空缓存的股票数据
+                
                 # 立即更新数据以反映新的股票池
                 self.update_market_data()
+                
                 # 显示提示
-                stocks_count = len(self.market_state.tradable_symbols) if self.market_state else 0
+                stocks_count = len(self.market_state.tradable_symbols) if hasattr(self.market_state, 'tradable_symbols') else len(self.market_state.symbols)
                 QMessageBox.information(self, "股票池已变更", 
                                         f"已切换到 {pool_name} 股票池，包含 {stocks_count} 只股票")
             else:
