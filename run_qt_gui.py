@@ -4,6 +4,9 @@
 """
 SETO-Versal 交易系统启动脚本 - PyQt6 版本
 集成了datetime修复模块，确保所有导入和注解问题都得到解决
+
+版本: v0.7.0
+更新日期: 2025-04-03
 """
 
 import os
@@ -13,6 +16,10 @@ import logging
 import re
 import importlib.util
 from pathlib import Path
+
+# 系统版本信息
+VERSION = "0.7.0"
+VERSION_DATE = "2025-04-03"
 
 # 设置日志
 logging.basicConfig(
@@ -284,7 +291,8 @@ def main():
     # 确保日志目录存在
     os.makedirs('logs', exist_ok=True)
     
-    print("正在启动 SETO-Versal 交易系统界面 (PyQt6版本)...")
+    print(f"正在启动 SETO-Versal 交易系统界面 v{VERSION} (PyQt6版本)...")
+    logger.info(f"启动 SETO-Versal v{VERSION} ({VERSION_DATE})")
     
     # 添加全面的datetime补丁，确保所有模块都能正确导入和使用datetime
     logger.info("添加全面的datetime模块补丁...")
