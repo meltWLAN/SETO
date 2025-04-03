@@ -1324,6 +1324,200 @@ class MarketState:
         
         return sectors 
 
+    def change_stock_pool(self, pool_name):
+        """切换当前股票池
+        
+        Args:
+            pool_name (str): 股票池名称，如'沪深300', '中证500'等
+            
+        Returns:
+            bool: 是否成功切换股票池
+        """
+        logger.info(f"切换股票池: {pool_name}")
+        try:
+            # 先尝试从文件加载股票池
+            universe_file = os.path.join(self.data_dir, f"{pool_name}.json")
+            if os.path.exists(universe_file):
+                try:
+                    with open(universe_file, 'r', encoding='utf-8') as f:
+                        symbols = json.load(f)
+                    logger.info(f"从文件加载 {pool_name} 股票池，共 {len(symbols)} 只股票")
+                    self.symbols = symbols
+                    self.tradable_symbols = symbols
+                    self.update()  # 更新市场数据
+                    return True
+                except Exception as e:
+                    logger.error(f"加载股票池文件 {universe_file} 失败: {e}")
+            
+            # 检查是否有预定义的股票池
+            if pool_name == '沪深300':
+                from seto_versal.data.stock_pools import HS300_STOCKS
+                if HS300_STOCKS and len(HS300_STOCKS) > 0:
+                    self.symbols = HS300_STOCKS
+                    self.tradable_symbols = HS300_STOCKS
+                    logger.info(f"已加载沪深300股票池，共 {len(self.symbols)} 只股票")
+                    self.update()  # 更新市场数据
+                    return True
+                else:
+                    # 尝试动态获取沪深300成分股
+                    try:
+                        # 尝试使用tushare获取沪深300成分股
+                        import tushare as ts
+                        token = os.environ.get('TUSHARE_TOKEN', '')
+                        if token:
+                            ts.set_token(token)
+                            pro = ts.pro_api()
+                            df = pro.index_weight(index_code='000300.SH')
+                            if not df.empty:
+                                symbols = df['con_code'].tolist()
+                                logger.info(f"从TuShare获取沪深300成分股，共 {len(symbols)} 只")
+                                # 如果数量异常，可能是API限制，使用预设的样本
+                                if len(symbols) < 100:
+                                    logger.warning(f"沪深300成分股数量异常: {len(symbols)}，使用预设样本")
+                                    symbols = self._get_hs300_sample()
+                                self.symbols = symbols
+                                self.tradable_symbols = symbols
+                                self.update()  # 更新市场数据
+                                return True
+                    except Exception as e:
+                        logger.error(f"动态获取沪深300成分股失败: {e}")
+                        # 使用预设的样本
+                        symbols = self._get_hs300_sample()
+                        self.symbols = symbols
+                        self.tradable_symbols = symbols
+                        self.update()  # 更新市场数据
+                        logger.info(f"使用预设沪深300样本，共 {len(self.symbols)} 只股票")
+                        return True
+            
+            elif pool_name == '中证500':
+                from seto_versal.data.stock_pools import ZZ500_STOCKS
+                if ZZ500_STOCKS and len(ZZ500_STOCKS) > 0:
+                    self.symbols = ZZ500_STOCKS
+                    self.tradable_symbols = ZZ500_STOCKS
+                    logger.info(f"已加载中证500股票池，共 {len(self.symbols)} 只股票")
+                    self.update()  # 更新市场数据
+                    return True
+                else:
+                    # 尝试动态获取中证500成分股
+                    try:
+                        # 尝试使用tushare获取中证500成分股
+                        import tushare as ts
+                        token = os.environ.get('TUSHARE_TOKEN', '')
+                        if token:
+                            ts.set_token(token)
+                            pro = ts.pro_api()
+                            df = pro.index_weight(index_code='000905.SH')
+                            if not df.empty:
+                                symbols = df['con_code'].tolist()
+                                logger.info(f"从TuShare获取中证500成分股，共 {len(symbols)} 只")
+                                # 如果数量异常，可能是API限制，使用预设的样本
+                                if len(symbols) < 300:
+                                    logger.warning(f"中证500成分股数量异常: {len(symbols)}，使用预设样本")
+                                    symbols = self._get_zz500_sample()
+                                self.symbols = symbols
+                                self.tradable_symbols = symbols
+                                self.update()  # 更新市场数据
+                                return True
+                    except Exception as e:
+                        logger.error(f"动态获取中证500成分股失败: {e}")
+                        # 使用预设的样本
+                        symbols = self._get_zz500_sample()
+                        self.symbols = symbols
+                        self.tradable_symbols = symbols
+                        self.update()  # 更新市场数据
+                        logger.info(f"使用预设中证500样本，共 {len(self.symbols)} 只股票")
+                        return True
+            
+            # 其他股票池处理
+            # 暂未实现
+                  
+            logger.warning(f"未能找到股票池 {pool_name} 的数据，保持当前股票池不变")
+            return False
+            
+        except Exception as e:
+            logger.error(f"切换股票池失败: {e}")
+            return False
+    
+    def _get_hs300_sample(self):
+        """获取沪深300样本股票列表"""
+        # 返回沪深300主要成分股（前150只）
+        return [
+            # 金融
+            '600036.SH', '601318.SH', '601398.SH', '601288.SH', '600030.SH',
+            '601166.SH', '601328.SH', '601601.SH', '601988.SH', '600016.SH',
+            '601169.SH', '601818.SH', '601628.SH', '601336.SH', '601688.SH',
+            '600999.SH', '601211.SH', '601377.SH', '601066.SH', '600958.SH',
+            # 消费
+            '600519.SH', '000858.SZ', '002304.SZ', '600887.SH', '600276.SH',
+            '000333.SZ', '000651.SZ', '601888.SH', '603288.SH', '000568.SZ',
+            '600690.SH', '000568.SZ', '600809.SH', '000596.SZ', '600438.SH',
+            # 科技
+            '000725.SZ', '002415.SZ', '002594.SZ', '600703.SH', '002230.SZ',
+            '600050.SH', '002475.SZ', '002241.SZ', '000063.SZ', '002027.SZ',
+            '688981.SH', '688111.SH', '688036.SH', '688126.SH', '688012.SH',
+            # 工业
+            '601766.SH', '600031.SH', '600009.SH', '601857.SH', '600019.SH',
+            '601668.SH', '601800.SH', '601390.SH', '601186.SH', '600028.SH',
+            '601006.SH', '601899.SH', '601669.SH', '601989.SH', '600585.SH',
+            # 医药
+            '600196.SH', '000538.SZ', '002252.SZ', '600085.SH', '600518.SH',
+            '603259.SH', '300760.SZ', '300759.SZ', '300347.SZ', '600763.SH',
+            '002821.SZ', '603883.SH', '600436.SH', '603833.SH', '300015.SZ',
+            # 地产
+            '600048.SH', '001979.SZ', '600606.SH', '000069.SZ', '600340.SH',
+            '601155.SH', '000002.SZ', '600383.SH', '001914.SZ', '600266.SH',
+            # 交通运输
+            '601111.SH', '600029.SH', '601021.SH', '601333.SH', '600115.SH',
+            '601919.SH', '601866.SH', '600009.SH', '600029.SH', '601298.SH',
+            # 能源
+            '601857.SH', '600028.SH', '601898.SH', '600900.SH', '600905.SH',
+            '601985.SH', '600025.SH', '601225.SH', '600886.SH', '601088.SH',
+            # 农业
+            '000998.SZ', '600598.SH', '002714.SZ', '600108.SH', '000876.SZ',
+            '600339.SH', '002385.SZ', '600737.SH', '603977.SH', '601952.SH',
+            # 其他行业的样本股
+            '601618.SH', '600104.SH', '600741.SH', '601138.SH', '600111.SH',
+            '600309.SH', '601901.SH', '601088.SH', '600019.SH', '600705.SH',
+            '600795.SH', '000651.SZ', '600703.SH', '603392.SH', '688661.SH',
+            '688012.SH', '600570.SH', '002594.SZ', '300124.SZ', '002415.SZ'
+        ]
+    
+    def _get_zz500_sample(self):
+        """获取中证500样本股票列表"""
+        # 返回中证500部分样本股（前100只）
+        return [
+            # 中小市值金融
+            '600909.SH', '601995.SH', '601997.SH', '600155.SH', '000776.SZ',
+            '000728.SZ', '002142.SZ', '600291.SH', '600906.SH', '600958.SH',
+            # 中小消费
+            '600779.SH', '600873.SH', '002557.SZ', '603899.SH', '603605.SH',
+            '600132.SH', '000848.SZ', '600872.SH', '600597.SH', '600298.SH',
+            # 中小科技
+            '002463.SZ', '300033.SZ', '002371.SZ', '002230.SZ', '300454.SZ',
+            '300496.SZ', '300223.SZ', '300274.SZ', '300302.SZ', '300782.SZ',
+            # 中小工业
+            '600967.SH', '600031.SH', '600803.SH', '000969.SZ', '603885.SH',
+            '603369.SH', '600848.SH', '600502.SH', '600875.SH', '002686.SZ',
+            # 中小医药
+            '600422.SH', '600566.SH', '002773.SZ', '603368.SH', '603939.SH',
+            '002262.SZ', '300676.SZ', '300529.SZ', '300595.SZ', '300633.SZ',
+            # 中小地产/建筑
+            '600376.SH', '000537.SZ', '000981.SZ', '600376.SH', '600173.SH',
+            '600546.SH', '600657.SH', '600895.SH', '600208.SH', '000671.SZ',
+            # 中小能源
+            '600256.SH', '600777.SH', '600025.SH', '600021.SH', '600483.SH',
+            '000780.SZ', '000690.SZ', '600323.SH', '600021.SH', '600578.SH',
+            # 中小材料
+            '600426.SH', '000807.SZ', '002092.SZ', '002601.SZ', '600143.SH',
+            '002466.SZ', '002064.SZ', '600409.SH', '002810.SZ', '600516.SH',
+            # 中小信息技术
+            '002410.SZ', '300168.SZ', '002439.SZ', '300308.SZ', '300285.SZ',
+            '300474.SZ', '002368.SZ', '300661.SZ', '002268.SZ', '300073.SZ',
+            # 其他行业样本股
+            '002833.SZ', '603885.SH', '300408.SZ', '300383.SZ', '300450.SZ',
+            '002157.SZ', '300413.SZ', '600099.SH', '002049.SZ', '600171.SH'
+        ]
+
     def _load_sector_data(self):
         """加载股票行业数据"""
         try:
