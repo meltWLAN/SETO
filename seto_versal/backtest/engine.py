@@ -11,7 +11,8 @@ import logging
 import json
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+import datetime
+from datetime import timedelta
 from typing import Dict, List, Tuple, Any, Optional, Union, Callable, Type, Set
 import matplotlib.pyplot as plt
 from collections import defaultdict
@@ -19,7 +20,10 @@ from collections import defaultdict
 from seto_versal.data.manager import DataManager, TimeFrame
 from seto_versal.strategy.manager import Strategy, StrategyManager
 from seto_versal.risk.controller import RiskController, RiskLevel
+from seto_versal.data.config import get_data_source_config
 
+# 使用datetime.datetime类型而不是datetime模块作为类型提示
+DateType = datetime.datetime
 
 class Trade:
     """
@@ -28,7 +32,7 @@ class Trade:
     
     def __init__(self, 
                  symbol: str, 
-                 timestamp: datetime, 
+                 timestamp: DateType, 
                  direction: str, 
                  quantity: float, 
                  price: float, 
@@ -561,8 +565,8 @@ class BacktestResult:
     def __init__(self, 
                 portfolio: Portfolio, 
                 backtest_config: Dict[str, Any], 
-                start_time: datetime, 
-                end_time: datetime):
+                start_time: DateType, 
+                end_time: DateType):
         """
         初始化回测结果
         
@@ -704,32 +708,58 @@ class BacktestResult:
     
     def get_history_dataframe(self) -> pd.DataFrame:
         """
-        获取历史数据的DataFrame
+        获取回测历史数据的DataFrame格式
         
         Returns:
-            历史数据DataFrame
+            回测历史数据的DataFrame
         """
-        if not self.portfolio.history:
-            return pd.DataFrame()
+        data = []
         
-        # 转换历史记录为DataFrame
-        history_data = []
+        # 兼容性处理：检查是否有history属性
+        if hasattr(self, 'history') and isinstance(self.history, dict):
+            # 原有的以字典形式存储的历史记录处理方式
+            for timestamp, record in sorted(self.history.items()):
+                record_dict = {
+                    "timestamp": timestamp,
+                    "equity": record.get("equity", 0.0),
+                    "cash": record.get("cash", 0.0),
+                    "holdings_value": record.get("holdings_value", 0.0),
+                    "daily_return": record.get("daily_return", 0.0),
+                    "daily_return_percentage": record.get("daily_return_percentage", 0.0)
+                }
+                data.append(record_dict)
+        elif hasattr(self.portfolio, 'history') and isinstance(self.portfolio.history, list):
+            # 从portfolio获取历史记录
+            for record in self.portfolio.history:
+                if 'timestamp' in record:
+                    data.append(record)
         
-        for point in self.portfolio.history:
-            data = {
-                "timestamp": point["timestamp"],
-                "cash": point["cash"],
-                "equity": point["equity"],
-                "positions_value": point["positions_value"],
-                "drawdown": point["drawdown"],
-                "drawdown_percentage": point["drawdown_percentage"]
-            }
-            history_data.append(data)
-        
-        df = pd.DataFrame(history_data)
-        df.set_index("timestamp", inplace=True)
+        df = pd.DataFrame(data)
+        if not df.empty and 'timestamp' in df.columns:
+            df.set_index("timestamp", inplace=True)
         
         return df
+    
+    def get_equity_curve(self) -> pd.DataFrame:
+        """
+        获取权益曲线数据
+        
+        Returns:
+            包含时间和权益值的DataFrame
+        """
+        history_df = self.get_history_dataframe()
+        
+        # 如果历史数据为空，返回空的DataFrame
+        if history_df.empty:
+            return pd.DataFrame(columns=["timestamp", "equity"])
+        
+        # 构建包含时间和权益值的DataFrame
+        equity_curve = history_df[["equity"]].copy()
+        
+        # 重置索引，使timestamp变为列
+        equity_curve = equity_curve.reset_index()
+        
+        return equity_curve
     
     def plot_equity_curve(self, save_path: Optional[str] = None) -> None:
         """
@@ -984,7 +1014,7 @@ class Backtest:
                 if self.config["risk_rules_file"]:
                     risk_config["risk_rules_file"] = self.config["risk_rules_file"]
                 
-                self.risk_controller = RiskController("backtest", risk_config)
+                self.risk_controller = RiskController(risk_config)
         else:
             self.risk_controller = None
     
@@ -998,32 +1028,82 @@ class Backtest:
         """
         self.strategy_manager.add_strategy(strategy, weight)
     
-    def run(self, 
-          symbols: List[str], 
-          timeframe: TimeFrame, 
-          start_time: datetime, 
-          end_time: Optional[datetime] = None, 
-          initial_capital: float = 100000.0) -> BacktestResult:
+    def run_backtest(self, stocks: List[str] = None, 
+                    timeframe: TimeFrame = TimeFrame.DAY_1,
+                    start_date: str = None, 
+                    end_date: str = None,
+                    strategy_name: str = None,
+                    initial_capital: float = 100000.0,
+                    commission_rate: float = 0.001,
+                    slippage: float = 0.001,
+                    enable_short: bool = False) -> 'BacktestResult':
         """
         运行回测
         
         Args:
-            symbols: 交易品种列表
+            stocks: 股票代码列表
             timeframe: 时间周期
-            start_time: 开始时间
-            end_time: 结束时间，如果为None则使用当前时间
+            start_date: 开始日期
+            end_date: 结束日期
+            strategy_name: 策略名称
             initial_capital: 初始资金
+            commission_rate: 佣金率
+            slippage: 滑点
+            enable_short: 是否允许做空
             
         Returns:
             回测结果
         """
-        if end_time is None:
-            end_time = datetime.now()
+        # 设置默认值
+        if not stocks:
+            # 使用CSV数据源中可用的股票
+            available_symbols = self.data_manager.get_available_symbols()
+            if available_symbols:
+                stocks = available_symbols[:3]  # 使用前三个可用股票
+            else:
+                # 默认使用中国A股主要股票
+                stocks = ["600000.SH", "000001.SZ", "600519.SH"]  # 浦发银行、平安银行、贵州茅台
         
-        self.logger.info(f"开始回测: {symbols}, {timeframe}, {start_time} 至 {end_time}")
+        if not start_date:
+            start_date = "2022-01-01"
         
-        # 更新配置
-        self.set_config({"initial_capital": initial_capital})
+        if not end_date:
+            import datetime
+            end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            
+        if not strategy_name:
+            # 使用策略管理器中第一个可用的策略
+            strategies = self.strategy_manager.get_strategies()
+            if strategies:
+                strategy_name = list(strategies)[0]
+            else:
+                strategy_name = "ma_cross_strategy"
+            
+        # 确保风险控制器存在
+        if self.risk_controller is None:
+            from seto_versal.risk.controller import RiskController
+            self.risk_controller = RiskController({
+                'name': 'backtest_risk_controller',
+                'level': 'medium'
+            })
+            
+        # 尝试初始化合适的数据源
+        self._setup_china_market_data()
+        
+        # 转换日期格式 - 修复类型注解错误
+        import datetime as dt
+        start_time = dt.datetime.strptime(start_date, "%Y-%m-%d")
+        end_time = dt.datetime.strptime(end_date, "%Y-%m-%d")
+        
+        self.logger.info(f"开始回测: {len(stocks)} 只股票, {timeframe}, {start_time} 至 {end_time}")
+        
+        # 更新配置以记录使用的抽样方法
+        self.set_config({
+            "initial_capital": initial_capital,
+            "sample_method": "all",
+            "sample_size": len(stocks),
+            "random_seed": None
+        })
         
         # 重置投资组合和状态
         self.portfolio.reset()
@@ -1040,7 +1120,7 @@ class Backtest:
         
         # 获取历史数据
         all_data = {}
-        for symbol in symbols:
+        for symbol in stocks:  # 使用抽样后的股票列表
             data = self.data_manager.get_historical_data(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -1067,7 +1147,7 @@ class Backtest:
         all_timestamps = sorted(all_timestamps)
         
         # 运行回测循环
-        start_processing_time = datetime.now()
+        start_processing_time = datetime.datetime.now()
         
         for timestamp in all_timestamps:
             self.current_date = timestamp
@@ -1087,7 +1167,7 @@ class Backtest:
             for strategy in self.strategy_manager.get_strategies():
                 # 检查策略是否支持当前交易品种
                 strategy_symbols = []
-                for symbol in symbols:
+                for symbol in stocks:  # 使用抽样后的股票列表
                     if strategy.can_trade_symbol(symbol):
                         strategy_symbols.append(symbol)
                 
@@ -1128,7 +1208,7 @@ class Backtest:
             
             self.stats["processed_bars"] += len(current_bars)
         
-        end_processing_time = datetime.now()
+        end_processing_time = datetime.datetime.now()
         self.stats["processing_time"] = (end_processing_time - start_processing_time).total_seconds()
         
         self.is_running = False
@@ -1223,3 +1303,59 @@ class Backtest:
             回测结果
         """
         return self.result 
+
+    def _setup_china_market_data(self):
+        """确保中国市场数据源可用"""
+        # 检查当前数据源
+        current_sources = self.data_manager.get_data_sources()
+        source_names = [source.name for source in current_sources if hasattr(source, 'name')]
+        
+        # 尝试从配置中获取Tushare token
+        try:
+            tushare_config = get_data_source_config('tushare')
+            api_token = tushare_config.get('api_token')
+            
+            if api_token and api_token != 'your_tushare_token_here':
+                self.logger.info("使用配置的Tushare API Token")
+            else:
+                # 检查环境变量
+                import os
+                api_token = os.environ.get('TUSHARE_TOKEN')
+                if api_token:
+                    self.logger.info("使用环境变量中的Tushare API Token")
+                else:
+                    self.logger.warning("未找到有效的Tushare API Token，请配置token后重试")
+        except Exception as e:
+            self.logger.warning(f"读取Tushare配置失败: {e}")
+            api_token = None
+        
+        # 如果没有Tushare或Akshare数据源，尝试添加
+        if 'tushare' not in source_names and api_token:
+            try:
+                self.logger.info("初始化Tushare数据源用于中国A股数据...")
+                # 使用配置的token初始化Tushare数据源
+                tushare_config = {'name': 'tushare', 'api_token': api_token}
+                self.data_manager.add_data_source('tushare', tushare_config)
+                self.data_manager.set_default_data_source('tushare')
+                self.logger.info("Tushare数据源初始化成功")
+            except Exception as e:
+                self.logger.warning(f"Tushare数据源初始化失败: {e}")
+                
+        # 如果Tushare初始化失败，尝试Akshare
+        if 'akshare' not in source_names and 'tushare' not in source_names:
+            try:
+                self.logger.info("尝试初始化Akshare数据源...")
+                # 尝试初始化Akshare数据源
+                self.data_manager.add_data_source('akshare', {'name': 'akshare'})
+                self.data_manager.set_default_data_source('akshare')
+                self.logger.info("Akshare数据源初始化成功")
+            except Exception as e:
+                self.logger.warning(f"Akshare数据源初始化失败: {e}")
+        
+        # 确保CSV数据源可用作为备选
+        if 'csv' not in source_names:
+            try:
+                self.data_manager.add_data_source('csv', {'name': 'csv'})
+                self.logger.info("CSV数据源初始化成功")
+            except Exception as e:
+                self.logger.warning(f"CSV数据源初始化失败: {e}") 

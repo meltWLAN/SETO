@@ -988,25 +988,48 @@ class MarketAnalysisPanel(QFrame):
         flat_sectors = 0
         total_change = 0
         
+        # 检查sectors是列表还是字典
+        is_list_type = isinstance(sectors, list)
+        
         # 行业变化百分比列表
         sector_changes = []
         
-        for sector_name, sector_data in sectors.items():
-            # 提取变化百分比
-            change_percent = sector_data.get('change_percent', 0)
-            sector_changes.append((sector_name, change_percent))
-            
-            # 统计涨跌家数
-            if change_percent > 0.5:  # 涨幅超过0.5%视为上涨
-                up_sectors += 1
-            elif change_percent < -0.5:  # 跌幅超过0.5%视为下跌
-                down_sectors += 1
-            else:
-                flat_sectors += 1
+        if is_list_type:
+            # 处理列表类型的sectors
+            for sector in sectors:
+                # 提取变化百分比
+                change_percent = sector.get('change_pct', 0)
+                sector_name = sector.get('name', 'Unknown')
+                sector_changes.append((sector_name, change_percent))
                 
-            # 累计总变化
-            total_change += change_percent
-            
+                # 统计涨跌家数
+                if change_percent > 0.5:  # 涨幅超过0.5%视为上涨
+                    up_sectors += 1
+                elif change_percent < -0.5:  # 跌幅超过0.5%视为下跌
+                    down_sectors += 1
+                else:
+                    flat_sectors += 1
+                    
+                # 累计总变化
+                total_change += change_percent
+        else:
+            # 处理字典类型的sectors
+            for sector_name, sector_data in sectors.items():
+                # 提取变化百分比
+                change_percent = sector_data.get('change_percent', 0)
+                sector_changes.append((sector_name, change_percent))
+                
+                # 统计涨跌家数
+                if change_percent > 0.5:  # 涨幅超过0.5%视为上涨
+                    up_sectors += 1
+                elif change_percent < -0.5:  # 跌幅超过0.5%视为下跌
+                    down_sectors += 1
+                else:
+                    flat_sectors += 1
+                    
+                # 累计总变化
+                total_change += change_percent
+                
         # 计算平均变化
         avg_change = total_change / sector_count if sector_count > 0 else 0
         
@@ -1025,27 +1048,20 @@ class MarketAnalysisPanel(QFrame):
         # 构建市场概览
         market_overview = f"""
         <h3>市场概览 ({now})</h3>
-        <p>目前市场整体呈现<span style="color: {"red" if avg_change > 0 else "green"}; font-weight: bold;">
-        {("上涨" if avg_change > 0 else "下跌") if avg_change != 0 else "持平"}
-        </span>态势，平均涨幅 <span style="color: {"red" if avg_change > 0 else "green"}; font-weight: bold;">
-        {avg_change:.2f}%</span>。</p>
-        
-        <p>在监测的{sector_count}个行业中，{up_sectors}个上涨，{down_sectors}个下跌，{flat_sectors}个基本持平。</p>
+        <p>市场整体情况：{
+            "上涨" if avg_change > 0.5 else 
+            "下跌" if avg_change < -0.5 else "震荡"
+        }，平均变动幅度 {avg_change:.2f}%</p>
+        <p>行业统计：上涨{up_sectors}个，震荡{flat_sectors}个，下跌{down_sectors}个</p>
         """
         
-        # 构建行业热点分析
+        # 构建热点分析
         if top_sectors:
             hotspot_analysis = "<h3>行业热点分析</h3><ul>"
             
             for sector_name, change in top_sectors:
-                sector_data = sectors.get(sector_name, {})
-                leading_stock = sector_data.get('leading_stock', {})
-                leading_symbol = leading_stock.get('symbol', '')
-                leading_change = leading_stock.get('change_percent', 0) * 100
-                
                 hotspot_analysis += f"""
-                <li><strong>{sector_name}</strong>: 上涨 <span style="color: red;">{change:.2f}%</span> 
-                龙头股 {leading_symbol} {leading_change:.2f}%</li>
+                <li><strong>{sector_name}</strong>: 上涨 <span style="color: red;">{change:.2f}%</span></li>
                 """
                 
             hotspot_analysis += "</ul>"
@@ -1057,15 +1073,41 @@ class MarketAnalysisPanel(QFrame):
             opportunity_analysis = "<h3>投资机会分析</h3><ul>"
             
             for sector_name, change in top_sectors:
-                sector_data = sectors.get(sector_name, {})
-                stocks = sector_data.get('stocks', [])
-                
-                # 提取行业内表现良好的股票
-                if stocks and isinstance(stocks, list):
-                    stock_str = ', '.join(stocks[:3])
-                    opportunity_analysis += f"""
-                    <li><strong>{sector_name}</strong>: 可关注 {stock_str}</li>
-                    """
+                # 处理列表类型的sectors
+                if is_list_type:
+                    # 查找匹配的sector数据
+                    matching_sectors = [s for s in sectors if s.get('name') == sector_name]
+                    if matching_sectors:
+                        sector_data = matching_sectors[0]
+                        # 从sector的leading_stocks字段提取前导股票
+                        leading_stocks = sector_data.get('leading_stocks', '')
+                        if leading_stocks:
+                            opportunity_analysis += f"""
+                            <li><strong>{sector_name}</strong>: 可关注 {leading_stocks}</li>
+                            """
+                        else:
+                            opportunity_analysis += f"""
+                            <li><strong>{sector_name}</strong>: 行业整体表现强势</li>
+                            """
+                    else:
+                        opportunity_analysis += f"""
+                        <li><strong>{sector_name}</strong>: 行业整体表现强势</li>
+                        """
+                else:
+                    # 处理字典类型的sectors
+                    sector_data = sectors.get(sector_name, {})
+                    stocks = sector_data.get('stocks', [])
+                    
+                    # 提取行业内表现良好的股票
+                    if stocks and isinstance(stocks, list):
+                        stock_str = ', '.join(stocks[:3])
+                        opportunity_analysis += f"""
+                        <li><strong>{sector_name}</strong>: 可关注 {stock_str}</li>
+                        """
+                    else:
+                        opportunity_analysis += f"""
+                        <li><strong>{sector_name}</strong>: 行业整体表现强势</li>
+                        """
                     
             opportunity_analysis += "</ul>"
         else:
@@ -2086,8 +2128,15 @@ class SetoMainWindow(QMainWindow):
                     market_analysis += f"""{best_sectors[0]['name']}板块受市场情绪带动，整体上涨{best_sectors[0]['change_pct']:.2f}%；
                     """
                 if len(best_sectors) > 1:
-                    market_analysis += f"""{best_sectors[1]['name']}板块在{best_sectors[1]['leading_stocks'].split('(')[0]}带动下，整体涨幅达{best_sectors[1]['change_pct']:.2f}%。</p>
-                    """
+                    lead_stocks = best_sectors[1]['leading_stocks']
+                    # 安全地处理leading_stocks，检查是否包含括号格式
+                    if '(' in lead_stocks:
+                        name_part = lead_stocks.split('(')[0]
+                        market_analysis += f"""{best_sectors[1]['name']}板块在{name_part}带动下，整体涨幅达{best_sectors[1]['change_pct']:.2f}%。</p>
+                        """
+                    else:
+                        market_analysis += f"""{best_sectors[1]['name']}板块在{lead_stocks}带动下，整体涨幅达{best_sectors[1]['change_pct']:.2f}%。</p>
+                        """
                 else:
                     market_analysis += "</p>"
             else:
@@ -2099,9 +2148,20 @@ class SetoMainWindow(QMainWindow):
                 """
             
             if best_sectors:
-                leading_name = best_sectors[0]['leading_stocks'].split('(')[0]
-                leading_symbol = best_sectors[0]['leading_stocks'].split('(')[1].strip(')')
-                market_analysis += f"""<p>短期投资机会：关注{best_sectors[0]['name']}板块龙头企业{leading_name}({leading_symbol})，该股近期表现强势，涨幅{best_sectors[0]['leading_change']:.2f}%。</p>
+                # 安全地获取领先股票信息
+                lead_stocks = best_sectors[0]['leading_stocks']
+                if '(' in lead_stocks and ')' in lead_stocks:
+                    leading_name = lead_stocks.split('(')[0]
+                    leading_symbol = lead_stocks.split('(')[1].strip(')')
+                else:
+                    # 如果格式不符合预期，就直接使用整个字符串作为名称，符号留空
+                    leading_name = lead_stocks
+                    leading_symbol = ""
+                
+                market_analysis += f"""<p>短期投资机会：关注{best_sectors[0]['name']}板块龙头企业{leading_name}"""
+                if leading_symbol:
+                    market_analysis += f"""({leading_symbol})"""
+                market_analysis += f"""，该股近期表现强势，涨幅{best_sectors[0]['leading_change']:.2f}%。</p>
                 """
                 
                 if len(best_sectors) > 1:
