@@ -2184,7 +2184,25 @@ class SetoMainWindow(QMainWindow):
                 market_analysis += "<p>暂无明显风险板块。</p>"
             
             if hasattr(self, 'analysis_panel'):
-                self.analysis_panel.update_analysis(sectors, market_analysis)
+                # 添加日志记录来定位问题
+                logger.info(f"正在更新分析面板，sectors类型: {type(sectors)}, 长度: {len(sectors)}")
+                
+                # 检查每个sector是否有必要的字段 - 这可以帮助调试
+                # 添加一个额外的检查以确保sectors中的每个元素都有必需的键
+                valid_sectors = []
+                for sector in sectors:
+                    if isinstance(sector, dict) and all(key in sector for key in ['name', 'change_pct', 'leading_stocks', 'leading_change']):
+                        valid_sectors.append(sector)
+                    else:
+                        logger.warning(f"忽略无效的sector数据: {sector}")
+                
+                # 使用验证过的sectors进行更新
+                if valid_sectors:
+                    self.analysis_panel.update_analysis(valid_sectors, market_analysis)
+                else:
+                    # 如果没有有效的sector数据，使用一个空列表和错误消息
+                    logger.warning("没有找到有效的sector数据，使用空列表")
+                    self.analysis_panel.update_analysis([], "没有有效的行业数据可以显示。")
                 
             # 2. 更新算法交易面板状态
             # 模拟算法监测到的市场信号
